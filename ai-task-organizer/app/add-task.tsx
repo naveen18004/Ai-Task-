@@ -35,10 +35,16 @@ export default function AddTask() {
       date: parsed.date,
       time: parsed.time,
       priority: parsed.priority,
+      location: parsed.location,
       createdAt: new Date().toISOString()
     };
 
-    await saveTaskStr(newTask);
+    const saved = await saveTaskStr(newTask);
+    if (!saved) {
+      Alert.alert("Duplicate Task", "This exact task is already in your list.");
+      router.back();
+      return;
+    }
 
     // If date & time exist, schedule reminder
     if (parsed.date && parsed.time) {
@@ -76,7 +82,7 @@ export default function AddTask() {
     try {
       const apiKey = await getApiKey();
       if (!apiKey) {
-        Alert.alert("API Key Missing", "Please add your Gemini API Key in the Settings tab first.");
+        Alert.alert("Activation Code Missing", "Please add your Activation Code in the Settings tab first.");
         return;
       }
 
@@ -113,7 +119,7 @@ export default function AddTask() {
       const groqApiKey = await getGroqApiKey();
 
       if (!groqApiKey) {
-        Alert.alert("Groq API Key Missing", "Please add your Free Groq API Key in Settings to use Voice features.");
+        Alert.alert("Voice Transcription Code Missing", "Please add your Free Voice Transcription Code in Settings to use Voice features.");
         return;
       }
 
@@ -138,15 +144,21 @@ export default function AddTask() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Create Task</Text>
+      <View style={styles.header}>
+        <Text style={styles.subtitle}>New Entry</Text>
+        <Text style={styles.title}>Create Task</Text>
+      </View>
 
-      <TextInput
-        placeholder="Paste, speak, or scan task"
-        value={taskText}
-        onChangeText={setTaskText}
-        multiline
-        style={styles.input}
-      />
+      <View style={styles.inputContainer}>
+        <TextInput
+          placeholder="Paste, speak, or type your task..."
+          placeholderTextColor="#94A3B8"
+          value={taskText}
+          onChangeText={setTaskText}
+          multiline
+          style={styles.input}
+        />
+      </View>
 
       <View style={styles.buttonRow}>
         {/* Toggle between Start/Stop Recording based on state */}
@@ -154,13 +166,18 @@ export default function AddTask() {
           style={[styles.btnSecondary, recording ? styles.btnRecording : null]}
           onPress={recording ? stopRecording : startRecording}
           disabled={isProcessingAudio}
+          activeOpacity={0.8}
         >
           <Text style={[styles.btnTextSecondary, recording ? styles.btnTextRecording : null]}>
-            {isProcessingAudio ? "Analyzing..." : recording ? "⏹️ Stop & Parse" : "🎙️ Speak Task"}
+            {isProcessingAudio ? "Analyzing..." : recording ? "⏹️ Stop" : "🎙️ Speak"}
           </Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.btnPrimary} onPress={saveTask}>
+        <TouchableOpacity
+          style={styles.btnPrimary}
+          onPress={saveTask}
+          activeOpacity={0.8}
+        >
           <Text style={styles.btnTextPrimary}>Analyze & Save</Text>
         </TouchableOpacity>
       </View>
@@ -171,56 +188,95 @@ export default function AddTask() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
-    backgroundColor: "#F6F7FB",
+    padding: 24,
+    backgroundColor: "#F8FAFC",
+  },
+  header: {
+    marginTop: 40,
+    marginBottom: 24,
+  },
+  subtitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#94A3B8",
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    marginBottom: 4,
   },
   title: {
-    fontSize: 22,
-    fontWeight: "700",
-    marginBottom: 20,
+    fontSize: 32,
+    fontWeight: "800",
+    color: "#0F172A",
+    letterSpacing: -0.5,
+  },
+  inputContainer: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    shadowColor: "#64748B",
+    shadowOpacity: 0.08,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: "#F1F5F9",
+    marginBottom: 24,
   },
   input: {
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 16,
-    minHeight: 120,
+    padding: 20,
+    minHeight: 180,
     textAlignVertical: "top",
+    fontSize: 18,
+    lineHeight: 28,
+    color: "#0F172A",
   },
   buttonRow: {
     flexDirection: "row",
-    gap: 12,
-    marginTop: 20,
+    gap: 16,
   },
   btnSecondary: {
     flex: 1,
-    backgroundColor: "#E5E7EB",
-    padding: 14,
-    borderRadius: 14,
+    backgroundColor: "#FFFFFF",
+    padding: 16,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
+    shadowColor: "#64748B",
+    shadowOpacity: 0.05,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
+    borderWidth: 1,
+    borderColor: "#E2E8F0",
   },
   btnRecording: {
-    backgroundColor: "#FEE2E2", // Light red to indicate live recording
-    borderWidth: 1,
-    borderColor: "#EF4444",
+    backgroundColor: "#FEF2F2", // Very light red
+    borderColor: "#FECACA",
   },
   btnTextSecondary: {
-    color: "#374151",
-    fontWeight: "600",
+    color: "#475569",
+    fontWeight: "700",
+    fontSize: 16,
   },
   btnTextRecording: {
     color: "#EF4444",
-    fontWeight: "700"
   },
   btnPrimary: {
     flex: 2,
-    backgroundColor: "#2563EB",
-    padding: 14,
-    borderRadius: 14,
+    backgroundColor: "#6366F1", // Indigo
+    padding: 16,
+    borderRadius: 16,
     alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#6366F1",
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 4,
   },
   btnTextPrimary: {
-    color: "#fff",
-    fontWeight: "600",
+    color: "#FFFFFF",
+    fontWeight: "700",
+    fontSize: 16,
+    letterSpacing: 0.3,
   },
 });

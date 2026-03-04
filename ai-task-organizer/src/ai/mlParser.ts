@@ -5,24 +5,33 @@ export interface MLRawTask extends ParsedTask {
 }
 
 export async function extractTasksWithML(text: string, apiKey: string): Promise<MLRawTask[]> {
-    const prompt = `You are a highly intelligent task extraction AI. Extract all actionable tasks, reminders, meetings or events from the following raw OCR text. 
-CRITICAL: Ignore conversational noise, software UI elements, standalone phone numbers, battery percentages, and timestamps that aren't clearly attached to an action.
+    const prompt = `You are an expert NLP task-extraction engine. Your ONLY purpose is to read raw text (from OCR, voice transcripts, or paste) and extract clear, concise, actionable tasks.
+
+CRITICAL PROCESSING RULES:
+1. AGGRESSIVE CONSOLIDATION: Never split a single event, project, notification, or requirement into multiple tasks. If the text describes a singular event (like a "Review", "Meeting", "Assignment", or "Trip") with multiple sub-requirements (bring documents, prepare demo, wear uniform), SUMMARIZE them into ONE single comprehensive task description.
+2. ACTIONABLE ONLY: Completely ignore informational statements ("The meeting will be held...", "All students must..."). Instead, rephrase it as an action FOR THE USER (e.g., "Attend meeting", "Complete assignment").
+13. DATE & TIME PARSING: Identify ANY date representation (e.g., "02.03.2026", "March 2nd", "Tomorrow", "Next Friday") and convert it to a standard JS date string format (e.g., "Mon Mar 02 2026"). Identify time (e.g., 14:30, 2 PM) and convert to a standard format (e.g. '14:30' or '2:00 PM').  If no date/time is mentioned, leave it empty. Current relative date/time context: ${new Date().toDateString()}.
+14. REMOVE NOISE: Strip away all conversational filler, UI artifacts, signatures, standalone phone numbers, or battery percentages.
+15. FALLBACK: If the text contains absolutely nothing actionable (e.g., it's just a random paragraph of facts or a simple "hello"), return an empty array [].
+16. LOCATION: Extract the location (e.g., "Conference Room A", "Starbucks", "Online") if mentioned.
+17. SHORT SUMMARY: The "text" field MUST be a precise, actionable summary, maximum 60 characters long.
 
 Format the output EXACTLY as a JSON array of objects with the following schema:
 [
   { 
-    "text": "The actual task description (e.g., 'Buy groceries at kotturpuram')",
-    "intent": "meeting" | "call" | "reminder" | "submission" | "exam", 
-    "date": "Parsed date string (e.g., 'Wed Jan 28 2026') or empty string", 
-    "time": "Parsed time string (e.g., '9:00 pm') or empty string", 
+    "text": "Clean, short task description under 60 chars (e.g., 'Submit report')",
+    "intent": "meeting" | "call" | "reminder" | "submission" | "exam" | "task", 
+    "date": "Standardized date string (e.g., 'Mon Mar 02 2026') or ''", 
+    "time": "Standardized time string (e.g., '9:00 AM', '2:30 PM', '14:30') or ''", 
+    "location": "Location string if found, otherwise empty",
     "category": "Work" | "Communication" | "Personal" | "Education" | "General", 
     "priority": "high" | "medium" | "low"
   }
 ]
 
-Do not return markdown formatting, just the raw JSON array. If there are no tasks, return an empty array [].
+Do not return Markdown formatting or code blocks. Return ONLY the raw JSON array.
 
-Raw OCR Text to analyze:
+Raw Text to analyze:
 ${text}
 `;
 

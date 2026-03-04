@@ -15,16 +15,19 @@ RULES FOR TASKS:
 3. For date: Use today's date (${new Date().toDateString()}) when "today" is mentioned, tomorrow's when "tomorrow" is mentioned.
 4. For time: Always format as "H:MM AM/PM" (e.g., "1:00 PM", "8:00 PM").
 5. Return FEWER tasks rather than more. Quality over quantity. Maximum 10 unique tasks.
+6. LOCATION: Extract the location (e.g., "Conference Room A", "Starbucks", "Online") if mentioned.
+7. SHORT SUMMARY: The "text" field MUST be a precise, actionable summary, maximum 60 characters long.
 
 Return exactly this JSON structure:
 {
   "rawText": "The full transcribed text of the conversation.",
   "tasks": [
     {
-      "text": "Clean task description (e.g., 'Submit report')",
+      "text": "Clean, short task description under 60 chars (e.g., 'Submit report')",
       "intent": "meeting" | "call" | "reminder" | "submission" | "exam" | "task",
       "date": "Date string (e.g., '${new Date().toDateString()}') or empty",
       "time": "Time string (e.g., '1:00 PM') or empty",
+      "location": "Location string if found, otherwise empty",
       "category": "Work" | "Personal" | "Education" | "General",
       "priority": "high" | "medium" | "low"
     }
@@ -101,6 +104,8 @@ RULES FOR TASKS:
 3. For date: Use today's date (${new Date().toDateString()}) when "today" is mentioned, tomorrow's when "tomorrow" is mentioned.
 4. For time: Always format as "H:MM AM/PM" (e.g., "1:00 PM", "8:00 PM").
 5. Return FEWER tasks rather than more. Quality over quantity. Maximum 10 unique tasks.
+6. LOCATION: Extract the location (e.g., "Conference Room A", "Starbucks", "Online") if mentioned.
+7. SHORT SUMMARY: The "text" field MUST be a precise, actionable summary, maximum 60 characters long.
 
 Transcription:
 """
@@ -112,10 +117,11 @@ Return exactly this JSON structure:
   "rawText": "The full transcribed text of the conversation.",
   "tasks": [
     {
-      "text": "Clean task description (e.g., 'Submit report')",
+      "text": "Clean, short task description under 60 chars (e.g., 'Submit report')",
       "intent": "meeting" | "call" | "reminder" | "submission" | "exam" | "task",
       "date": "Date string (e.g., '${new Date().toDateString()}') or empty",
       "time": "Time string (e.g., '1:00 PM') or empty",
+      "location": "Location string if found, otherwise empty",
       "category": "Work" | "Personal" | "Education" | "General",
       "priority": "high" | "medium" | "low"
     }

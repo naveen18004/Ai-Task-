@@ -1,7 +1,10 @@
 import * as Clipboard from 'expo-clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { parseTaskText, ParsedTask } from '../ai/taskParser';
-import { isClipboardProcessed, markClipboardProcessed, saveTaskStr, Task, getApiKey } from '../storage/asyncStorage';
+import { isClipboardProcessed, markClipboardProcessed, saveTaskStr, getTasks, Task, getApiKey } from '../storage/asyncStorage';
 import { scheduleReminder } from '../notifications/notificationService';
+
+const LAST_CLIPBOARD_KEY = '@ai_task_organizer_last_clipboard';
 
 /** Robustly build a Date from dateStr ("Fri Feb 20 2026") + timeStr ("12:09 PM" or "14:30") */
 function buildReminderDate(dateStr: string, timeStr: string): Date | null {
@@ -52,45 +55,73 @@ export const processClipboard = async (): Promise<boolean> => {
         const text = await Clipboard.getStringAsync();
         if (!text || text.trim() === '') return false;
 
-        // Check if already processed
-        const isProcessed = await isClipboardProcessed(text);
-        if (isProcessed) return false;
-
-        // Process line by line
-        const lines = text.split('\n').filter(line => line.trim().length > 3);
-        let taskAdded = false;
-
-        for (const line of lines) {
-            const parsed: ParsedTask = parseTaskText(line);
-
-            const newTask: Task = {
-                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-                text: line.trim(),
-                intent: parsed.intent,
-                category: parsed.category,
-                date: parsed.date,
-                time: parsed.time,
-                priority: parsed.priority,
-                createdAt: new Date().toISOString()
-            };
-
-            await saveTaskStr(newTask);
-            taskAdded = true;
-
-            if (parsed.date && parsed.time) {
-                const reminderDate = buildReminderDate(parsed.date, parsed.time);
-                const now = new Date();
-                if (reminderDate && reminderDate > now) {
-                    await scheduleReminder('AI Task Detected', line.trim(), reminderDate);
-                    console.log('Reminder scheduled for', reminderDate.toLocaleString());
-                } else {
-                    console.log('Reminder skipped: date is in the past or invalid', parsed.date, parsed.time);
-                }
-            }
+        // Prevent infinite respawns if the user deleted the task but it's still on their clipboard
+        const lastProcessed = await AsyncStorage.getItem(LAST_CLIPBOARD_KEY);
+        if (lastProcessed === text) {
+            return false; // The clipboard hasn't changed since we last processed it
         }
 
-        if (taskAdded) {
-            await markClipboardProcessed(text);
+        // It's a new clipboard payload, mark it as the latest
+        await AsyncStorage.setItem(LAST_CLIPBOARD_KEY, text);
+
+        const rawText = text.trim();
+
+        // ── TASK HEURISTIC FILTER ──
+        // If the text doesn't contain typical task/action words, don't auto-import it.
+        // This prevents capturing randomURLs, code snippets, or conversational text.
+        // Removed generic words (today, tomorrow, read, start, check) to prevent chat messages from triggering it.
+        const taskKeywords = /\b(submit|remind|meeting|test|exam|deadline|assignment|homework|project|report|finish|complete|attend|prepare|review|schedule|appointment|doctor|pick\s?up|grocery|groceries|pay|clean|cook|study|visit)\b/i;
+
+        // Also ensure it's a reasonable length (not a massive essay, not a single word)
+        if (rawText.length < 5 || rawText.length > 250 || !taskKeywords.test(rawText)) {
+            return false;
+        }
+
+        const parsed: ParsedTask = parseTaskText(rawText);
+
+        // Use the smart summary text that the parser generates, or fallback to rawText
+        const finalTaskText = parsed.text || rawText;
+
+        // Fetch existing tasks to check for semantic duplicates
+        const existingTasks = await getTasks();
+
+        // Deduplication Logic: Block if EXACT same text & dates exist.
+        const isDuplicate = existingTasks.some((t: Task) =>
+            t.text === finalTaskText &&
+            t.date === parsed.date &&
+            t.time === parsed.time
+        );
+
+        if (isDuplicate) {
+            console.log('Skipping duplicate task from clipboard');
+            return false;
+        }
+
+        const newTask: Task = {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+            text: finalTaskText,
+            intent: parsed.intent,
+            category: parsed.category,
+            date: parsed.date,
+            time: parsed.time,
+            priority: parsed.priority,
+            location: parsed.location,
+            createdAt: new Date().toISOString()
+        };
+
+        const saved = await saveTaskStr(newTask);
+        if (!saved) return false;
+        let taskAdded = true;
+
+        if (parsed.date && parsed.time) {
+            const reminderDate = buildReminderDate(parsed.date, parsed.time);
+            const now = new Date();
+            if (reminderDate && reminderDate > now) {
+                await scheduleReminder('AI Task Detected', rawText, reminderDate);
+                console.log('Reminder scheduled for', reminderDate.toLocaleString());
+            } else {
+                console.log('Reminder skipped: date is in the past or invalid', parsed.date, parsed.time);
+            }
         }
 
         return taskAdded;

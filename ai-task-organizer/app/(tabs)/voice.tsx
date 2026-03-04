@@ -4,6 +4,7 @@ import { useState } from "react";
 import * as DocumentPicker from 'expo-document-picker';
 import { parseTaskText } from "../../src/ai/taskParser";
 import { transcribeAudioWithGroq } from "../../src/ai/groqAudio";
+import { extractTasksFromText } from "../../src/ai/geminiAudio";
 import { MLRawTask } from "../../src/ai/mlParser";
 import { addOfflineTaskToCalendar } from "../../src/utils/calendar";
 import { getApiKey, getGroqApiKey } from "../../src/storage/asyncStorage";
@@ -16,7 +17,7 @@ export default function VoiceTab() {
     const handleImportAudio = async () => {
         const apiKey = await getApiKey();
         if (!apiKey) {
-            Alert.alert("API Key Missing", "Please add your Gemini API Key in the Settings tab first.");
+            Alert.alert("Activation Code Missing", "Please add your Activation Code in the Settings tab first.");
             return;
         }
 
@@ -37,7 +38,7 @@ export default function VoiceTab() {
             const groqApiKey = await getGroqApiKey();
 
             if (!groqApiKey) {
-                Alert.alert("Missing Groq API Key", "Please set your free Groq API Key in the Settings tab to use voice transcription.");
+                Alert.alert("Missing Voice Transcription Code", "Please set your free Voice Transcription Code in the Settings tab to use voice transcription.");
                 setIsProcessing(false);
                 return;
             }
@@ -55,19 +56,26 @@ export default function VoiceTab() {
                 return;
             }
 
-            // 2. We use the local rule-based NLP to avoid hitting the Gemini text rate limit
-            console.log('Parsing tasks offline...');
-            const parsed = parseTaskText(transcribedText);
-
-            setRawText(transcribedText);
-            setExtractedTasks([{
-                text: transcribedText,
-                intent: parsed.intent,
-                date: parsed.date,
-                time: parsed.time,
-                priority: parsed.priority,
-                category: parsed.category,
-            }]);
+            // 2. Use Gemini Text extractor to parse multiple tasks accurately
+            console.log('Parsing tasks with Gemini...');
+            try {
+                const extractionResult = await extractTasksFromText(transcribedText, apiKey);
+                setRawText(extractionResult.rawText);
+                setExtractedTasks(extractionResult.tasks);
+            } catch (err) {
+                // Fallback to offline parser if Gemini fails (e.g. rate limit)
+                console.log('Falling back to offline parser...', err);
+                const parsed = parseTaskText(transcribedText);
+                setRawText(transcribedText);
+                setExtractedTasks([{
+                    text: transcribedText,
+                    intent: parsed.intent,
+                    date: parsed.date,
+                    time: parsed.time,
+                    priority: parsed.priority as any,
+                    category: parsed.category,
+                }]);
+            }
 
         } catch (error: any) {
             console.error(error);
@@ -84,6 +92,7 @@ export default function VoiceTab() {
             intent: task.intent,
             date: task.date || "",
             time: task.time || "",
+            category: task.category || "General",
             priority: task.priority as any
         });
     };
@@ -92,59 +101,68 @@ export default function VoiceTab() {
         <SafeAreaView style={styles.safe}>
             <ScrollView style={styles.container}>
                 <View style={styles.header}>
+                    <Text style={styles.subtitle}>Transcription</Text>
                     <Text style={styles.title}>Voice Tasks</Text>
-                    <Text style={styles.subtitle}>Powered by Gemini 2.0 Flash</Text>
                 </View>
 
                 <TouchableOpacity
                     style={styles.importBtn}
                     onPress={handleImportAudio}
                     disabled={isProcessing}
+                    activeOpacity={0.8}
                 >
                     {isProcessing ? (
-                        <ActivityIndicator color="#fff" />
+                        <ActivityIndicator color="#FFFFFF" />
                     ) : (
-                        <Text style={styles.importBtnText}>Import Call Recording</Text>
+                        <View style={styles.btnContent}>
+                            <Text style={styles.importBtnText}>🎙️ Import Call Recording</Text>
+                        </View>
                     )}
                 </TouchableOpacity>
 
                 {isProcessing && (
                     <View style={styles.loadingContainer}>
-                        <Text style={styles.processingText}>Gemini is listening to your audio...</Text>
+                        <Text style={styles.processingText}>Groq is listening to your audio...</Text>
                         <Text style={styles.processingSubText}>(This is fast, but larger files take a few seconds)</Text>
                     </View>
                 )}
 
                 {rawText ? (
                     <View style={styles.transcriptionBox}>
-                        <Text style={styles.sectionTitle}>Transcription:</Text>
+                        <Text style={styles.sectionTitle}>Raw Transcript</Text>
                         <Text style={styles.transcriptionText}>{rawText}</Text>
                     </View>
                 ) : null}
 
                 {extractedTasks.length > 0 && (
                     <View style={styles.tasksContainer}>
-                        <Text style={styles.sectionTitle}>Detected Tasks</Text>
+                        <Text style={styles.sectionTitleBlack}>Detected Tasks</Text>
                         {extractedTasks.map((task, index) => (
                             <View key={index} style={styles.taskCard}>
                                 <View style={styles.taskHeader}>
                                     <View style={[styles.badge, styles.intentBadge]}>
-                                        <Text style={styles.badgeText}>{task.intent.toUpperCase()}</Text>
+                                        <Text style={styles.badgeTextDark}>{task.intent.toUpperCase()}</Text>
                                     </View>
                                     <View style={[styles.badge, task.priority === 'high' ? styles.highBadge : styles.lowBadge]}>
-                                        <Text style={styles.badgeText}>{task.priority.toUpperCase()}</Text>
+                                        <Text style={[styles.badgeTextDark, task.priority === 'high' ? styles.badgeTextRed : styles.badgeTextGreen]}>
+                                            {task.priority.toUpperCase()}
+                                        </Text>
                                     </View>
                                 </View>
 
                                 <Text style={styles.taskText}>{task.text}</Text>
 
                                 {(task.date || task.time) && (
-                                    <Text style={styles.dateTimeText}>📅 {task.date} ⏰ {task.time}</Text>
+                                    <View style={styles.metricsRow}>
+                                        {task.date && <Text style={styles.metricPill}>📅 {task.date}</Text>}
+                                        {task.time && <Text style={styles.metricPill}>⏰ {task.time}</Text>}
+                                    </View>
                                 )}
 
                                 <TouchableOpacity
                                     style={styles.calendarBtn}
                                     onPress={() => handleAddToCalendar(task)}
+                                    activeOpacity={0.8}
                                 >
                                     <Text style={styles.calendarBtnText}>+ Add to Device Calendar</Text>
                                 </TouchableOpacity>
@@ -158,66 +176,103 @@ export default function VoiceTab() {
 }
 
 const styles = StyleSheet.create({
-    safe: { flex: 1, backgroundColor: "#F6F7FB" },
-    container: { padding: 20 },
-    header: { marginBottom: 30 },
-    title: { fontSize: 28, fontWeight: "700", color: "#1F2937" },
-    subtitle: { fontSize: 16, color: "#6B7280", marginTop: 4 },
+    safe: { flex: 1, backgroundColor: "#F8FAFC" },
+    container: { padding: 24, paddingBottom: 60 },
+    header: { marginBottom: 32, marginTop: 16 },
+    subtitle: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#94A3B8",
+        textTransform: "uppercase",
+        letterSpacing: 1.2,
+        marginBottom: 4
+    },
+    title: {
+        fontSize: 32,
+        fontWeight: "800",
+        color: "#0F172A",
+        letterSpacing: -0.5
+    },
 
     importBtn: {
-        backgroundColor: "#2563EB",
-        padding: 16,
-        borderRadius: 12,
+        backgroundColor: "#6366F1",
+        padding: 18,
+        borderRadius: 20,
         alignItems: "center",
         justifyContent: "center",
-        shadowColor: "#2563EB",
+        shadowColor: "#6366F1",
         shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 4,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 6,
     },
-    importBtnText: { color: "#fff", fontSize: 16, fontWeight: "600" },
-    loadingContainer: { marginTop: 16, alignItems: 'center' },
-    processingText: { textAlign: "center", color: "#4B5563", fontWeight: '600' },
-    processingSubText: { textAlign: "center", color: "#9CA3AF", fontSize: 12, marginTop: 4 },
+    btnContent: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    importBtnText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700", letterSpacing: 0.5 },
+
+    loadingContainer: { marginTop: 24, alignItems: 'center' },
+    processingText: { textAlign: "center", color: "#64748B", fontWeight: '600', fontSize: 15 },
+    processingSubText: { textAlign: "center", color: "#94A3B8", fontSize: 13, marginTop: 6 },
 
     transcriptionBox: {
-        marginTop: 24,
-        backgroundColor: "#DBEAFE",
-        padding: 16,
-        borderRadius: 12,
+        marginTop: 32,
+        backgroundColor: "#F1F5F9",
+        padding: 24,
+        borderRadius: 24,
         borderWidth: 1,
-        borderColor: "#BFDBFE"
+        borderColor: "#E2E8F0"
     },
-    sectionTitle: { fontSize: 18, fontWeight: "600", marginBottom: 12, color: "#1E3A8A" },
-    transcriptionText: { color: "#1E40AF", lineHeight: 22, fontStyle: 'italic' },
+    sectionTitle: { fontSize: 14, fontWeight: "700", marginBottom: 16, color: "#64748B", textTransform: 'uppercase', letterSpacing: 1 },
+    sectionTitleBlack: { fontSize: 18, fontWeight: "700", marginBottom: 16, color: "#0F172A" },
+    transcriptionText: { color: "#334155", lineHeight: 28, fontStyle: 'italic', fontSize: 16 },
 
-    tasksContainer: { marginTop: 24 },
+    tasksContainer: { marginTop: 32 },
     taskCard: {
-        backgroundColor: "#fff",
-        padding: 16,
-        borderRadius: 12,
+        backgroundColor: "#FFFFFF",
+        padding: 24,
+        borderRadius: 24,
         marginBottom: 16,
-        shadowColor: "#000",
-        shadowOpacity: 0.05,
-        shadowRadius: 5,
-        elevation: 2,
-        borderLeftWidth: 4,
-        borderLeftColor: "#2563EB"
+        shadowColor: "#64748B",
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: "#F1F5F9",
     },
-    taskHeader: { flexDirection: "row", gap: 8, marginBottom: 12 },
-    badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-    intentBadge: { backgroundColor: "#F3F4F6" },
-    highBadge: { backgroundColor: "#FEE2E2" },
-    lowBadge: { backgroundColor: "#D1FAE5" },
-    badgeText: { fontSize: 12, fontWeight: "700", color: "#374151" },
-    taskText: { fontSize: 16, fontWeight: "500", color: "#111827", marginBottom: 8 },
-    dateTimeText: { fontSize: 14, color: "#6B7280", marginBottom: 16 },
+    taskHeader: { flexDirection: "row", gap: 8, marginBottom: 16 },
+    badge: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8 },
+    intentBadge: { backgroundColor: "#EEF2FF" },
+    highBadge: { backgroundColor: "#FEF2F2" },
+    lowBadge: { backgroundColor: "#ECFDF5" },
+    badgeTextDark: { fontSize: 12, fontWeight: "800", color: "#6366F1", textTransform: 'uppercase', letterSpacing: 0.5 },
+    badgeTextRed: { color: "#EF4444" },
+    badgeTextGreen: { color: "#10B981" },
+
+    taskText: { fontSize: 18, fontWeight: "600", color: "#0F172A", marginBottom: 16, lineHeight: 26 },
+
+    metricsRow: { flexDirection: "row", gap: 8, marginBottom: 20 },
+    metricPill: {
+        fontSize: 13,
+        fontWeight: "600",
+        color: "#475569",
+        backgroundColor: "#F8FAFC",
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: 10,
+        overflow: "hidden",
+        borderWidth: 1,
+        borderColor: "#F1F5F9",
+    },
 
     calendarBtn: {
-        backgroundColor: "#10B981",
-        paddingVertical: 10,
-        borderRadius: 8,
+        backgroundColor: "#F1F5F9",
+        paddingVertical: 14,
+        borderRadius: 12,
         alignItems: "center",
     },
-    calendarBtnText: { color: "#fff", fontWeight: "600" }
+    calendarBtnText: { color: "#0F172A", fontWeight: "700", fontSize: 14 }
 });

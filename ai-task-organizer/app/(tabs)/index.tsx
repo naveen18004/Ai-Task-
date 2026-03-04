@@ -1,4 +1,12 @@
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  TouchableOpacity,
+  Platform,
+  Linking,
+} from "react-native";
 import { router, useFocusEffect } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useState, useCallback } from "react";
@@ -61,6 +69,17 @@ export default function HomeTab() {
                   <View style={styles.statusTodo}>
                     <Text style={styles.statusText}>{task.time}</Text>
                   </View>
+                ) : null}
+                {task.location ? (
+                  <TouchableOpacity
+                    style={styles.statusLocation}
+                    onPress={() => {
+                      const q = encodeURIComponent(task.location as string);
+                      Linking.openURL(Platform.OS === 'ios' ? `maps://?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`);
+                    }}
+                  >
+                    <Text style={styles.statusLocationText}>📍 {task.location}</Text>
+                  </TouchableOpacity>
                 ) : null}
               </View>
             </View>
@@ -195,6 +214,18 @@ const styles = StyleSheet.create({
   },
   statusText: {
     color: "#2563EB",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  statusLocation: {
+    backgroundColor: "#EDE9FE",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignSelf: "flex-start",
+  },
+  statusLocationText: {
+    color: "#8B5CF6",
     fontSize: 12,
     fontWeight: "600",
   },

@@ -1,6 +1,6 @@
 import * as Calendar from 'expo-calendar';
 import { Alert, Platform } from 'react-native';
-import { OfflineTask } from '../ai/offlineNLP';
+import { ParsedTask } from '../ai/taskParser';
 
 /**
  * Requests native Calendar permissions and returns default calendar ID
@@ -26,7 +26,7 @@ export async function getDefaultCalendarSource() {
 /**
  * Creates an event in the native device calendar directly
  */
-export async function addOfflineTaskToCalendar(task: OfflineTask) {
+export async function addOfflineTaskToCalendar(task: ParsedTask) {
     try {
         const calendar = await getDefaultCalendarSource();
         if (!calendar) return;
@@ -57,9 +57,10 @@ export async function addOfflineTaskToCalendar(task: OfflineTask) {
         endDate.setHours(startDate.getHours() + 1);
 
         const eventId = await Calendar.createEventAsync(calendar.id, {
-            title: task.text,
+            title: task.text || "New Task",
             startDate: startDate,
             endDate: endDate,
+            location: task.location || undefined,
             notes: `Intent: ${task.intent} | Priority: ${task.priority}\n\nGenerated offline by AI Task Organizer`,
             timeZone: 'GMT', // Will default to device timezone automatically
         });

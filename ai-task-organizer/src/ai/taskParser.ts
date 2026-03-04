@@ -1,9 +1,11 @@
 export interface ParsedTask {
+  text?: string;
   intent: string;
   date: string;
   time: string;
   category: string;
   priority: string;
+  location?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -152,6 +154,18 @@ export function parseTaskText(text: string): ParsedTask {
     }
   }
 
+  // 4b. Numeric: dd.mm.yyyy 
+  if (!date) {
+    const dotDate = lower.match(/\b(\d{1,2})\.(\d{1,2})\.(\d{2,4})\b/);
+    if (dotDate) {
+      const day = parseInt(dotDate[1]);
+      const mon = parseInt(dotDate[2]) - 1;
+      const yr = dotDate[3].length === 2 ? 2000 + parseInt(dotDate[3]) : parseInt(dotDate[3]);
+      const d = new Date(yr, mon, day);
+      if (!isNaN(d.getTime())) date = toDateStr(d);
+    }
+  }
+
   // 5. "28 January", "28th Jan", "Jan 28", "January 28th"
   if (!date) {
     const monthNames = Object.keys(MONTH_NAMES).filter(k => k.length > 2).join('|');
@@ -217,6 +231,18 @@ export function parseTaskText(text: string): ParsedTask {
     }
   }
 
+  // ── Location extraction ──────────────────────────────────────────────────
+  let location = '';
+  // match "at [Place]" or "in [Place]", explicitly avoiding time/date words
+  const locMatch = text.match(/\b(?:at|in)\s+([A-Z][a-zA-Z0-9\s,']+(?:Room|Hall|Coffee|Cafe|Building|Block|Restaurant|Center|Centre|Campus|Office|Shop|Store|Hospital|Clinic|School|University|College)?)\b/);
+  if (locMatch) {
+    // simple heuristic: if it looks capitalized and isn't a time word
+    const locCandid = locMatch[1].trim();
+    if (!/^\d/.test(locCandid) && !/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(locCandid)) {
+      location = locCandid;
+    }
+  }
+
   // ── Smart priority boost ──────────────────────────────────────────────────
   if (date === toDateStr(now) && priority === 'medium') priority = 'high';
 
@@ -227,5 +253,30 @@ export function parseTaskText(text: string): ParsedTask {
   else if (intent === 'submission' || intent === 'exam') category = 'Education';
   else if (intent === 'appointment') category = 'Health';
 
-  return { intent, date, time, category, priority };
+  // ── Smart Summary ─────────────────────────────────────────────────────────
+  // Shrink long text into a concise title for the UI
+  let summary = text.trim();
+  const lines = summary.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  if (lines.length > 1) {
+    // If multiple lines, pick the first line as the "Title" (e.g. "*Format for Second Review MCA SS Batch*")
+    summary = lines[0];
+    // Strip asterisks or markdown bolding from the title
+    summary = summary.replace(/^\*+|\*+$/g, '');
+  }
+
+  // Truncate if it's still way too long
+  if (summary.length > 60) {
+    summary = summary.substring(0, 57).trim() + '...';
+  }
+
+  return {
+    text: summary, // OVERRIDE the raw text with our neat summary
+    intent,
+    date,
+    time,
+    category,
+    priority,
+    location
+  };
 }

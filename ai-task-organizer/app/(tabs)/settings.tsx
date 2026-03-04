@@ -29,40 +29,46 @@ export default function SettingsScreen() {
 
     const handleSave = async () => {
         if (!apiKey.trim()) {
-            Alert.alert("Error", "Please enter a valid API key");
+            Alert.alert("Error", "Please enter a valid key");
             return;
         }
         await saveApiKey(apiKey.trim());
         setIsSaved(true);
-        Alert.alert("Success", "Gemini API Key saved successfully. The ML Model is now active!");
+        Alert.alert("Success", "Activation Code saved successfully. The Feature is now active!");
     };
 
     const handleSaveGroq = async () => {
         if (!groqApiKey.trim()) {
-            Alert.alert("Error", "Please enter a valid API key");
+            Alert.alert("Error", "Please enter a valid key");
             return;
         }
         await saveGroqApiKey(groqApiKey.trim());
         setIsGroqSaved(true);
-        Alert.alert("Success", "Groq API Key saved successfully. Unlimited Voice Tasks are now active!");
+        Alert.alert("Success", "Voice Transcription Code saved successfully. Unlimited Voice Tasks are now active!");
     };
 
     return (
         <ScrollView contentContainerStyle={styles.container}>
             <View style={styles.header}>
-                <IconSymbol size={40} name="gear" color="#2563EB" />
-                <Text style={styles.title}>Settings</Text>
+                <View style={styles.iconWrapper}>
+                    <IconSymbol size={28} name="gear" color="#FFFFFF" />
+                </View>
+                <View>
+                    <Text style={styles.subtitle}>Configuration</Text>
+                    <Text style={styles.title}>Settings</Text>
+                </View>
             </View>
 
             <View style={styles.card}>
                 <Text style={styles.cardTitle}>ML Model Configuration</Text>
                 <Text style={styles.cardSubtitle}>
-                    To unlock powerful ML Task Parsing for OCR text, you need to provide a free Google Gemini API Key. This key is stored securely on your local device.
+                    To unlock powerful parsing for OCR text, you need to provide a free Activation Code. This code is stored securely on your local device.
                 </Text>
 
                 <TextInput
                     style={styles.input}
-                    placeholder="Enter your Gemini API Key..."
+                    placeholder="Enter your Activation Code..."
+                    placeholderTextColor="#94A3B8"
                     value={apiKey}
                     onChangeText={(text) => {
                         setApiKey(text);
@@ -76,40 +82,44 @@ export default function SettingsScreen() {
                 <TouchableOpacity
                     style={[styles.btnPrimary, isSaved && styles.btnSuccess]}
                     onPress={handleSave}
+                    activeOpacity={0.8}
                 >
                     <Text style={styles.btnTextPrimary}>
-                        {isSaved ? "Saved Successfully" : "Save API Key"}
+                        {isSaved ? "✓ Saved Successfully" : "Save Code"}
                     </Text>
                 </TouchableOpacity>
+
                 {/* Test Notification Button */}
                 <TouchableOpacity
-                    style={[styles.btnPrimary]}
+                    style={[styles.btnSecondary]}
                     onPress={async () => {
                         const triggerDate = new Date(Date.now() + 5000);
                         await scheduleReminder('Test Notification', 'This is a test notification', triggerDate);
                         Alert.alert('Test Scheduled', 'Notification will fire in 5 seconds');
                     }}
+                    activeOpacity={0.8}
                 >
-                    <Text style={styles.btnTextPrimary}>Test Notification</Text>
+                    <Text style={styles.btnTextSecondary}>Test Notification</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                     style={styles.linkContainer}
-                    onPress={() => Alert.alert("How to get a key", "Go to Google AI Studio (aistudio.google.com), sign in, and click 'Get API Key'. It is completely free!")}
+                    onPress={() => Alert.alert("How to get a code", "Go to Google AI Studio (aistudio.google.com), sign in, and create your code. It is completely free!")}
                 >
-                    <Text style={styles.linkText}>How do I get a free API Key?</Text>
+                    <Text style={styles.linkText}>How do I get a free Activation Code?</Text>
                 </TouchableOpacity>
             </View>
 
-            <View style={[styles.card, { marginTop: 20 }]}>
-                <Text style={styles.cardTitle}>Free Audio Transcription Config</Text>
+            <View style={[styles.card, { marginTop: 24 }]}>
+                <Text style={styles.cardTitle}>Free Audio Transcription</Text>
                 <Text style={styles.cardSubtitle}>
-                    To use the "Speak Task" feature without hitting audio generation limits, you need to provide a free Groq API Key.
+                    To use the "Speak Task" feature without hitting audio limits, you need to provide a free Voice Transcription Code.
                 </Text>
 
                 <TextInput
                     style={styles.input}
-                    placeholder="Enter your Groq API Key..."
+                    placeholder="Enter your Voice Transcription Code..."
+                    placeholderTextColor="#94A3B8"
                     value={groqApiKey}
                     onChangeText={(text) => {
                         setGroqApiKey(text);
@@ -123,17 +133,18 @@ export default function SettingsScreen() {
                 <TouchableOpacity
                     style={[styles.btnPrimary, isGroqSaved && styles.btnSuccess]}
                     onPress={handleSaveGroq}
+                    activeOpacity={0.8}
                 >
                     <Text style={styles.btnTextPrimary}>
-                        {isGroqSaved ? "Saved Successfully" : "Save Groq API Key"}
+                        {isGroqSaved ? "✓ Saved Successfully" : "Save Voice Transcription Code"}
                     </Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                     style={styles.linkContainer}
-                    onPress={() => Alert.alert("How to get a key", "Go to console.groq.com/keys, sign in, and click 'Create API Key'. It is completely free and requires no credit card!")}
+                    onPress={() => Alert.alert("How to get a code", "Go to console.groq.com/keys, sign in, and create your code. It is completely free and requires no credit card!")}
                 >
-                    <Text style={styles.linkText}>How do I get a free Groq API Key?</Text>
+                    <Text style={styles.linkText}>How do I get a free Voice Transcription Code?</Text>
                 </TouchableOpacity>
             </View>
         </ScrollView>
@@ -144,72 +155,126 @@ const styles = StyleSheet.create({
     container: {
         flexGrow: 1,
         padding: 24,
-        backgroundColor: "#F6F7FB",
+        backgroundColor: "#F8FAFC",
         paddingTop: 60,
+        paddingBottom: 60,
     },
     header: {
         flexDirection: "row",
         alignItems: "center",
-        marginBottom: 30,
+        marginBottom: 32,
+    },
+    iconWrapper: {
+        backgroundColor: "#6366F1",
+        width: 50,
+        height: 50,
+        borderRadius: 16,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: 16,
+        shadowColor: "#6366F1",
+        shadowOpacity: 0.3,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 4,
+    },
+    subtitle: {
+        fontSize: 14,
+        fontWeight: "600",
+        color: "#94A3B8",
+        textTransform: "uppercase",
+        letterSpacing: 1.2,
+        marginBottom: 2,
     },
     title: {
-        fontSize: 28,
-        fontWeight: "700",
-        marginLeft: 12,
-        color: "#1F2937",
+        fontSize: 32,
+        fontWeight: "800",
+        color: "#0F172A",
+        letterSpacing: -0.5,
     },
     card: {
-        backgroundColor: "#fff",
-        borderRadius: 16,
-        padding: 20,
-        shadowColor: "#000",
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 2,
+        backgroundColor: "#FFFFFF",
+        borderRadius: 24,
+        padding: 24,
+        shadowColor: "#64748B",
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 3,
+        borderWidth: 1,
+        borderColor: "#F1F5F9",
     },
     cardTitle: {
         fontSize: 18,
-        fontWeight: "600",
-        color: "#374151",
-        marginBottom: 10,
+        fontWeight: "700",
+        color: "#0F172A",
+        marginBottom: 12,
     },
     cardSubtitle: {
         fontSize: 14,
-        color: "#6B7280",
-        lineHeight: 20,
-        marginBottom: 20,
+        color: "#64748B",
+        lineHeight: 22,
+        marginBottom: 24,
     },
     input: {
-        backgroundColor: "#F3F4F6",
-        padding: 14,
-        borderRadius: 10,
+        backgroundColor: "#F8FAFC",
+        padding: 18,
+        borderRadius: 16,
         fontSize: 16,
-        color: "#1F2937",
-        marginBottom: 16,
+        color: "#0F172A",
+        marginBottom: 20,
         borderWidth: 1,
-        borderColor: "#E5E7EB",
+        borderColor: "#E2E8F0",
     },
     btnPrimary: {
-        backgroundColor: "#2563EB",
-        paddingVertical: 14,
-        borderRadius: 10,
+        backgroundColor: "#6366F1",
+        paddingVertical: 16,
+        borderRadius: 16,
         alignItems: "center",
         marginBottom: 16,
+        shadowColor: "#6366F1",
+        shadowOpacity: 0.3,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 4,
     },
     btnSuccess: {
         backgroundColor: "#10B981",
+        shadowColor: "#10B981",
+    },
+    btnSecondary: {
+        backgroundColor: "#FFFFFF",
+        paddingVertical: 16,
+        borderRadius: 16,
+        alignItems: "center",
+        marginBottom: 24,
+        borderWidth: 1,
+        borderColor: "#E2E8F0",
+        shadowColor: "#64748B",
+        shadowOpacity: 0.05,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 4 },
+        elevation: 2,
     },
     btnTextPrimary: {
-        color: "#fff",
-        fontWeight: "600",
+        color: "#FFFFFF",
+        fontWeight: "700",
         fontSize: 16,
+        letterSpacing: 0.5,
+    },
+    btnTextSecondary: {
+        color: "#475569",
+        fontWeight: "700",
+        fontSize: 16,
+        letterSpacing: 0.5,
     },
     linkContainer: {
         alignItems: "center",
+        paddingVertical: 8,
     },
     linkText: {
-        color: "#3B82F6",
+        color: "#6366F1",
         fontSize: 14,
-        fontWeight: "500",
+        fontWeight: "600",
     }
 });

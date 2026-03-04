@@ -55,28 +55,31 @@ export default function OCRScreen() {
 
                     let tasksAdded = 0;
                     for (const task of result.tasks) {
-                        await saveTaskStr({
+                        const saved = await saveTaskStr({
                             id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                             text: task.text, intent: task.intent, category: task.category,
                             date: task.date, time: task.time, priority: task.priority,
+                            location: task.location,
                             createdAt: new Date().toISOString()
                         });
 
-                        if (task.date && task.time) {
-                            const normalizedTime = task.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
-                            const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-                            const baseDateMs = new Date(task.date).setHours(0, 0, 0, 0);
-                            if (timeMatch && !isNaN(baseDateMs)) {
-                                let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
-                                const period = (timeMatch[3] || '').toUpperCase();
-                                if (period === 'PM' && h !== 12) h += 12;
-                                if (period === 'AM' && h === 12) h = 0;
-                                const base = new Date(baseDateMs);
-                                const rd = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
-                                if (rd > new Date()) await scheduleReminder('OCR Task Reminder', task.text, rd);
+                        if (saved) {
+                            if (task.date && task.time) {
+                                const normalizedTime = task.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
+                                const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+                                const baseDateMs = new Date(task.date).setHours(0, 0, 0, 0);
+                                if (timeMatch && !isNaN(baseDateMs)) {
+                                    let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
+                                    const period = (timeMatch[3] || '').toUpperCase();
+                                    if (period === 'PM' && h !== 12) h += 12;
+                                    if (period === 'AM' && h === 12) h = 0;
+                                    const base = new Date(baseDateMs);
+                                    const rd = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
+                                    if (rd > new Date()) await scheduleReminder('OCR Task Reminder', task.text, rd);
+                                }
                             }
+                            tasksAdded++;
                         }
-                        tasksAdded++;
                     }
 
                     if (tasksAdded > 0) {
@@ -86,7 +89,7 @@ export default function OCRScreen() {
                     }
                     return;
                 } catch (geminiError: any) {
-                    console.warn('Gemini Vision failed, falling back to free OCR...', geminiError.message);
+                    console.warn('Primary scanner failed, falling back to basic OCR.');
                     // Fall through to ocr.space fallback below
                 }
             }
@@ -113,60 +116,96 @@ export default function OCRScreen() {
             }
 
             const extracted = json.ParsedResults[0].ParsedText as string;
-            const lines = extracted.split('\n');
+            const lines = extracted.split(/\r?\n/);
+
+            let blocks: string[] = [];
+            let currentBlock: string[] = [];
+
+            for (const line of lines) {
+                let trimmed = line.trim();
+
+                // 1. Noise filtering (skip completely)
+                if (trimmed.length < 4) {
+                    if (currentBlock.length > 0) { blocks.push(currentBlock.join(' ')); currentBlock = []; }
+                    continue;
+                }
+                if (/^[0-9+\-\s()\/]+$/.test(trimmed)) {
+                    if (currentBlock.length > 0) { blocks.push(currentBlock.join(' ')); currentBlock = []; }
+                    continue;
+                }
+                if (/^(message yourself|message|type a message|you|today|yesterday|tomorrow)$/i.test(trimmed)) {
+                    if (currentBlock.length > 0) { blocks.push(currentBlock.join(' ')); currentBlock = []; }
+                    continue;
+                }
+                if (trimmed.length > 10 && trimmed.split(/\s+/).length <= 2 && /[A-Z].*[a-z].*\d/.test(trimmed)) continue;
+
+                // 2. Delimiter detection (flush current block)
+                const isTimestampLine = /^\d{1,2}:\d{2}\s*(am|pm)?\s*[a-zA-Z\/'"\.\s]*$/i.test(trimmed);
+                const isDateDelimiter = /^[a-zA-Z]+\s+\d{1,2},?\s+\d{4}$/.test(trimmed) || /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/.test(trimmed);
+
+                if (isTimestampLine || isDateDelimiter) {
+                    if (currentBlock.length > 0) {
+                        blocks.push(currentBlock.join(' '));
+                        currentBlock = [];
+                    }
+                    continue; // skip the pure timestamp line
+                }
+
+                // Clean up inline timestamps like "1:59 PM V/" at the end of a line
+                trimmed = trimmed.replace(/\s+\d{1,2}:\d{2}\s*(am|pm)?\s*[a-zA-Z\/'"\.\s]*$/i, '');
+
+                currentBlock.push(trimmed);
+            }
+            if (currentBlock.length > 0) {
+                blocks.push(currentBlock.join(' '));
+            }
+
             let tasksAdded = 0;
             const validTasks: string[] = [];
 
-            for (const line of lines) {
-                const trimmed = line.trim();
-                const lower = trimmed.toLowerCase();
+            for (let block of blocks) {
+                // Correct common OCR typos (like '1 O' instead of '10', 'Oam' instead of '0am')
+                block = block.replace(/\b(\d)\s*[oO]\b/g, '$10'); // Fixes "1 O" -> "10"
+                block = block.replace(/\b[oO]\s*(am|pm)\b/ig, '0$1'); // Fixes "Oam" -> "0am"
 
-                // SKIP: too short
-                if (trimmed.length < 8) continue;
+                const lower = block.toLowerCase();
 
-                // SKIP: pure timestamps like "11:09 AM W", "12:05 PM U", "12:41PM V/'"
-                if (/^\d{1,2}:\d{2}\s*(am|pm)?\s*[a-z\/'"]*$/i.test(trimmed)) continue;
-
-                // SKIP: phone numbers, random numbers
-                if (/^[0-9+\-\s()\/]+$/.test(trimmed)) continue;
-                if (/^\+?\d{2}\s?\d{4,}/.test(trimmed)) continue;
-
-                // SKIP: random strings (API keys, hashes — no spaces or very few)
-                if (trimmed.length > 10 && trimmed.split(/\s+/).length <= 2 && /[A-Z].*[a-z].*\d|_/.test(trimmed)) continue;
-
-                // SKIP: filenames or file info (OCR often adds spaces like ". pdf" or "59 kB")
-                if (/\b(pdf|docx?|xlsx?|pptx?|text?|png|jpe?g|gif|mp4|kb|mb|gb|pages?)\b/i.test(trimmed)) continue;
-
-                // SKIP: UI/app noise
-                if (/^(today|message yourself?|message|you|490\/0)$/i.test(trimmed)) continue;
-                if (/^\d{1,2}:\d{2}\s?(am|pm)/i.test(trimmed) && trimmed.split(/\s+/).length <= 3) continue;
-
-                // REQUIRE: must contain at least one task-like keyword/verb
-                const hasTaskKeyword = /\b(have|submit|remind|meeting|test|exam|call|buy|deadline|assignment|homework|project|report|finish|complete|attend|prepare|review|schedule|appointment|doctor|send|check|pick\s?up|grocery|groceries|return|pay|clean|cook|study|read|go\s+to|visit|start|begin|tomorrow|today|tonight)\b/i.test(lower);
+                // Filtering strictly based on keywords for OCR fallback to prevent garbage captures
+                const hasTaskKeyword = /\b(submit|remind|meeting|test|exam|deadline|assignment|homework|project|report|finish|complete|attend|prepare|review|schedule|appointment|doctor|pick\s?up|grocery|groceries|pay|clean|cook|study|visit)\b/i.test(lower);
 
                 if (!hasTaskKeyword) continue;
+                if (block.length < 10 || block.split(' ').length < 3) continue;
 
-                const parsed = parseTaskText(line);
-                await saveTaskStr({
+                const parsed = parseTaskText(block);
+
+                const saved = await saveTaskStr({
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-                    text: line.trim(), intent: parsed.intent, category: parsed.category,
-                    date: parsed.date, time: parsed.time, priority: parsed.priority,
+                    text: parsed.text || block,
+                    intent: parsed.intent,
+                    category: parsed.category,
+                    date: parsed.date,
+                    time: parsed.time,
+                    priority: parsed.priority,
+                    location: parsed.location,
                     createdAt: new Date().toISOString()
                 });
-                validTasks.push(line.trim());
-                tasksAdded++;
+
+                if (saved) {
+                    validTasks.push(block); // Show the full block in UI, not just summary
+                    tasksAdded++;
+                }
             }
 
-            setExtractedText(validTasks.join('\n'));
+            setExtractedText(validTasks.join('\n\n'));
 
             if (tasksAdded > 0) {
-                Alert.alert('OCR Success', `Extracted ${tasksAdded} task(s). For better results, add a Gemini API Key in Settings!`);
+                Alert.alert('OCR Success', `Extracted ${tasksAdded} task(s). For better results, add an Activation Code in Settings!`);
             } else {
-                Alert.alert('No Tasks Found', 'Add a Gemini API Key in Settings for much better image scanning!');
+                Alert.alert('No Tasks Found', 'Add an Activation Code in Settings for much better image scanning!');
             }
         } catch (error: any) {
             console.error('OCR Error:', error);
-            Alert.alert('OCR Error', error.message || 'Failed to extract text from the image.');
+            Alert.alert('Scanner Error', 'The image scanner is currently busy. Please try another image or import from the clipboard instead.');
         } finally {
             setIsProcessing(false);
         }
@@ -184,24 +223,27 @@ export default function OCRScreen() {
             if (apiKey) {
                 const mlTasks = await extractTasksWithML(text, apiKey);
                 for (const task of mlTasks) {
-                    await saveTaskStr({
+                    const saved = await saveTaskStr({
                         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                         text: task.text, intent: task.intent, category: task.category,
                         date: task.date, time: task.time, priority: task.priority,
+                        location: task.location,
                         createdAt: new Date().toISOString()
                     });
-                    if (task.date && task.time) {
-                        const normalizedTime = task.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
-                        const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-                        const baseDateMs = new Date(task.date).setHours(0, 0, 0, 0);
-                        if (timeMatch && !isNaN(baseDateMs)) {
-                            let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
-                            const period = (timeMatch[3] || '').toUpperCase();
-                            if (period === 'PM' && h !== 12) h += 12;
-                            if (period === 'AM' && h === 12) h = 0;
-                            const base = new Date(baseDateMs);
-                            const rd = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
-                            if (rd > new Date()) await scheduleReminder('Clipboard Task', task.text, rd);
+                    if (saved) {
+                        if (task.date && task.time) {
+                            const normalizedTime = task.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
+                            const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+                            const baseDateMs = new Date(task.date).setHours(0, 0, 0, 0);
+                            if (timeMatch && !isNaN(baseDateMs)) {
+                                let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
+                                const period = (timeMatch[3] || '').toUpperCase();
+                                if (period === 'PM' && h !== 12) h += 12;
+                                if (period === 'AM' && h === 12) h = 0;
+                                const base = new Date(baseDateMs);
+                                const rd = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
+                                if (rd > new Date()) await scheduleReminder('Clipboard Task', task.text, rd);
+                            }
                         }
                     }
                 }
@@ -210,30 +252,36 @@ export default function OCRScreen() {
             }
             // Fallback: rule-based
             const lines = text.split('\n').filter(l => l.trim().length > 3);
+            const strictKeywords = /\b(submit|remind|meeting|test|exam|deadline|assignment|homework|project|report|finish|complete|attend|prepare|review|schedule|appointment|doctor|pick\s?up|grocery|groceries|pay|clean|cook|study|visit)\b/i;
+
             let added = 0;
             for (const line of lines) {
+                if (!strictKeywords.test(line) || line.split(' ').length < 3) continue;
                 const parsed = parseTaskText(line);
-                await saveTaskStr({
+                const saved = await saveTaskStr({
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                     text: line.trim(), intent: parsed.intent, category: parsed.category,
                     date: parsed.date, time: parsed.time, priority: parsed.priority,
+                    location: parsed.location,
                     createdAt: new Date().toISOString()
                 });
-                if (parsed.date && parsed.time) {
-                    const normalizedTime = parsed.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
-                    const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-                    const baseDateMs = new Date(parsed.date).setHours(0, 0, 0, 0);
-                    if (timeMatch && !isNaN(baseDateMs)) {
-                        let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
-                        const period = (timeMatch[3] || '').toUpperCase();
-                        if (period === 'PM' && h !== 12) h += 12;
-                        if (period === 'AM' && h === 12) h = 0;
-                        const base = new Date(baseDateMs);
-                        const rd = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
-                        if (rd > new Date()) await scheduleReminder('Clipboard Task', line.trim(), rd);
+                if (saved) {
+                    if (parsed.date && parsed.time) {
+                        const normalizedTime = parsed.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
+                        const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+                        const baseDateMs = new Date(parsed.date).setHours(0, 0, 0, 0);
+                        if (timeMatch && !isNaN(baseDateMs)) {
+                            let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
+                            const period = (timeMatch[3] || '').toUpperCase();
+                            if (period === 'PM' && h !== 12) h += 12;
+                            if (period === 'AM' && h === 12) h = 0;
+                            const base = new Date(baseDateMs);
+                            const rd = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
+                            if (rd > new Date()) await scheduleReminder('Clipboard Task', line.trim(), rd);
+                        }
                     }
+                    added++;
                 }
-                added++;
             }
             Alert.alert('Clipboard Imported', `Added ${added} task(s) from clipboard!`);
         } catch (e) {
