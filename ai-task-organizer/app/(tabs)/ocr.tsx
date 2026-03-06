@@ -2,11 +2,13 @@ import { View, Text, StyleSheet, TouchableOpacity, Image, Alert, ScrollView } fr
 import { useState } from "react";
 import * as ImagePicker from "expo-image-picker";
 import * as Clipboard from "expo-clipboard";
-import { parseTaskText } from "@/src/ai/taskParser";
+import { parseTaskWithFallback } from "@/src/ai/fallbackParser";
 import { saveTaskStr, getApiKey } from "@/src/storage/asyncStorage";
 import { extractTasksWithML } from "@/src/ai/mlParser";
 import { extractTasksFromImage } from "@/src/ai/geminiVision";
 import { scheduleReminder } from "@/src/notifications/notificationService";
+import { LinearGradient } from "expo-linear-gradient";
+import { Ionicons } from "@expo/vector-icons";
 
 export default function OCRScreen() {
     const [image, setImage] = useState<string | null>(null);
@@ -164,19 +166,18 @@ export default function OCRScreen() {
             const validTasks: string[] = [];
 
             for (let block of blocks) {
-                // Correct common OCR typos (like '1 O' instead of '10', 'Oam' instead of '0am')
-                block = block.replace(/\b(\d)\s*[oO]\b/g, '$10'); // Fixes "1 O" -> "10"
-                block = block.replace(/\b[oO]\s*(am|pm)\b/ig, '0$1'); // Fixes "Oam" -> "0am"
+                // Correct common OCR typos
+                block = block.replace(/\b(\d)\s*[oO]\b/g, '$10');
+                block = block.replace(/\b[oO]\s*(am|pm)\b/ig, '0$1');
 
                 const lower = block.toLowerCase();
-
-                // Filtering strictly based on keywords for OCR fallback to prevent garbage captures
                 const hasTaskKeyword = /\b(submit|remind|meeting|test|exam|deadline|assignment|homework|project|report|finish|complete|attend|prepare|review|schedule|appointment|doctor|pick\s?up|grocery|groceries|pay|clean|cook|study|visit)\b/i.test(lower);
 
                 if (!hasTaskKeyword) continue;
                 if (block.length < 10 || block.split(' ').length < 3) continue;
 
-                const parsed = parseTaskText(block);
+                const parsed = await parseTaskWithFallback(block);
+                if (!parsed) continue;
 
                 const saved = await saveTaskStr({
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
@@ -191,7 +192,7 @@ export default function OCRScreen() {
                 });
 
                 if (saved) {
-                    validTasks.push(block); // Show the full block in UI, not just summary
+                    validTasks.push(block);
                     tasksAdded++;
                 }
             }
@@ -257,10 +258,12 @@ export default function OCRScreen() {
             let added = 0;
             for (const line of lines) {
                 if (!strictKeywords.test(line) || line.split(' ').length < 3) continue;
-                const parsed = parseTaskText(line);
+                const parsed = await parseTaskWithFallback(line);
+                if (!parsed) continue;
+
                 const saved = await saveTaskStr({
                     id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-                    text: line.trim(), intent: parsed.intent, category: parsed.category,
+                    text: parsed.text || line.trim(), intent: parsed.intent, category: parsed.category,
                     date: parsed.date, time: parsed.time, priority: parsed.priority,
                     location: parsed.location,
                     createdAt: new Date().toISOString()
@@ -293,28 +296,51 @@ export default function OCRScreen() {
 
     return (
         <ScrollView contentContainerStyle={styles.container}>
-            <Text style={styles.title}>OCR Task Scanner</Text>
-            <Text style={styles.subtitle}>Upload an image or screenshot to automatically extract Tasks and Reminders.</Text>
+            <View style={styles.header}>
+                <Text style={styles.subtitle}>Smart Import</Text>
+                <Text style={styles.title}>AI Scanner</Text>
+            </View>
 
-            <TouchableOpacity style={styles.btnPrimary} onPress={pickImage}>
-                <Text style={styles.btnTextPrimary}>Select Image from Gallery</Text>
-            </TouchableOpacity>
+            <View style={styles.actionCards}>
+                <TouchableOpacity style={styles.btnAction} onPress={pickImage} activeOpacity={0.8}>
+                    <LinearGradient
+                        colors={["#0EA5E9", "#2563EB"]}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        style={styles.gradientBg}
+                    >
+                        <Ionicons name="image-outline" size={32} color="#FFF" style={styles.btnIcon} />
+                        <Text style={styles.btnTextPrimary}>Scan from Gallery</Text>
+                    </LinearGradient>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#6D28D9', marginTop: 0 }]} onPress={pasteFromClipboard} disabled={isProcessing}>
-                <Text style={styles.btnTextPrimary}>📋  Import from Clipboard</Text>
-            </TouchableOpacity>
+                <TouchableOpacity style={styles.btnAction} onPress={pasteFromClipboard} disabled={isProcessing} activeOpacity={0.8}>
+                    <LinearGradient
+                        colors={["#8B5CF6", "#6D28D9"]}
+                        start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+                        style={styles.gradientBg}
+                    >
+                        <Ionicons name="clipboard-outline" size={32} color="#FFF" style={styles.btnIcon} />
+                        <Text style={styles.btnTextPrimary}>Import from Clipboard</Text>
+                    </LinearGradient>
+                </TouchableOpacity>
+            </View>
 
             {image && (
-                <Image source={{ uri: image }} style={styles.previewImage} />
+                <View style={styles.imageWrapper}>
+                    <Image source={{ uri: image }} style={styles.previewImage} />
+                </View>
             )}
 
             {isProcessing && (
-                <Text style={styles.processingText}>Scanning image for tasks...</Text>
+                <View style={styles.loadingState}>
+                    <Ionicons name="sparkles" size={40} color="#D97706" />
+                    <Text style={styles.processingText}>Extracting Magic...</Text>
+                </View>
             )}
 
             {extractedText ? (
                 <View style={styles.resultContainer}>
-                    <Text style={styles.resultTitle}>Extracted Text</Text>
+                    <Text style={styles.resultTitle}>Extracted Action Items</Text>
                     <Text style={styles.resultText}>{extractedText}</Text>
                 </View>
             ) : null}
@@ -326,71 +352,105 @@ const styles = StyleSheet.create({
     container: {
         flexGrow: 1,
         padding: 24,
-        backgroundColor: "#F6F7FB",
-        alignItems: "center",
-        justifyContent: "flex-start",
+        backgroundColor: "#F8FAFC",
         paddingTop: 60,
     },
-    title: {
-        fontSize: 26,
-        fontWeight: "700",
-        marginBottom: 8,
-        color: "#1F2937",
+    header: {
+        marginBottom: 32,
     },
     subtitle: {
         fontSize: 14,
-        color: "#6B7280",
-        textAlign: "center",
-        marginBottom: 30,
-        paddingHorizontal: 20,
+        fontWeight: "700",
+        color: "#94A3B8",
+        textTransform: "uppercase",
+        letterSpacing: 1.5,
+        marginBottom: 4,
     },
-    btnPrimary: {
-        backgroundColor: "#2563EB",
-        paddingVertical: 14,
-        paddingHorizontal: 24,
-        borderRadius: 14,
+    title: {
+        fontSize: 34,
+        fontWeight: "800",
+        color: "#0F172A",
+        letterSpacing: -1,
+    },
+    actionCards: {
+        gap: 16,
+        marginBottom: 32,
+    },
+    btnAction: {
+        borderRadius: 20,
+        overflow: "hidden",
+        shadowColor: "#000",
+        shadowOpacity: 0.1,
+        shadowRadius: 15,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 6,
+    },
+    gradientBg: {
+        flexDirection: "row",
         alignItems: "center",
-        marginBottom: 24,
+        paddingVertical: 20,
+        paddingHorizontal: 24,
+    },
+    btnIcon: {
+        marginRight: 16,
     },
     btnTextPrimary: {
         color: "#fff",
-        fontWeight: "600",
-        fontSize: 16,
+        fontWeight: "800",
+        fontSize: 18,
+        letterSpacing: -0.5,
+    },
+    imageWrapper: {
+        borderRadius: 24,
+        overflow: "hidden",
+        marginBottom: 24,
+        shadowColor: "#64748B",
+        shadowOpacity: 0.15,
+        shadowRadius: 20,
+        shadowOffset: { width: 0, height: 10 },
+        elevation: 5,
     },
     previewImage: {
         width: "100%",
-        height: 300,
-        borderRadius: 16,
-        resizeMode: "contain",
-        marginBottom: 20,
-        backgroundColor: "#E5E7EB",
+        height: 250,
+        resizeMode: "cover",
+    },
+    loadingState: {
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 40,
     },
     processingText: {
-        fontSize: 16,
+        fontSize: 18,
         color: "#D97706",
-        fontWeight: "500",
-        marginTop: 10,
+        fontWeight: "700",
+        marginTop: 16,
+        letterSpacing: -0.5,
     },
     resultContainer: {
         width: "100%",
-        backgroundColor: "#fff",
-        padding: 16,
-        borderRadius: 12,
+        backgroundColor: "#FFFFFF",
+        padding: 24,
+        borderRadius: 24,
         marginTop: 16,
-        shadowColor: "#000",
-        shadowOpacity: 0.05,
-        shadowRadius: 10,
-        elevation: 2,
+        shadowColor: "#64748B",
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 4,
+        borderWidth: 1,
+        borderColor: "#F1F5F9",
     },
     resultTitle: {
-        fontSize: 16,
-        fontWeight: "600",
-        marginBottom: 8,
-        color: "#374151",
+        fontSize: 18,
+        fontWeight: "700",
+        marginBottom: 12,
+        color: "#0F172A",
+        letterSpacing: -0.5,
     },
     resultText: {
-        fontSize: 14,
-        color: "#4B5563",
-        lineHeight: 22,
+        fontSize: 15,
+        color: "#475569",
+        lineHeight: 24,
     }
 });

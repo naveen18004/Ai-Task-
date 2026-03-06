@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import EditTaskModal from "@/components/EditTaskModal";
 import * as Clipboard from 'expo-clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from "expo-linear-gradient";
 
 const CATEGORIES = ["All", "Work", "Personal", "Education", "Health", "General"];
 
@@ -17,7 +18,6 @@ export default function ExploreScreen() {
 
   const loadTasks = async () => {
     const fetchedTasks = await getTasks();
-    // Sort by latest created (assuming array is already prepended or can sort here)
     fetchedTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
     setTasks(fetchedTasks);
   };
@@ -30,18 +30,20 @@ export default function ExploreScreen() {
 
   const handleLongPress = (task: Task) => {
     Alert.alert(
-      "Delete Task",
-      `Are you sure you want to delete "${task.text}"?`,
+      "Task Options",
+      `What do you want to do with "${task.text}"?`,
       [
         { text: "Cancel", style: "cancel" },
+        {
+          text: "Edit",
+          onPress: () => handleOpenEdit(task)
+        },
         {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
             await deleteTask(task.id);
             await removeClipboardProcessed(task.text);
-
-            // Clear OS clipboard and cache if it matches, allowing immediate re-copying
             const currentClip = await Clipboard.getStringAsync();
             if (currentClip === task.text) {
               await Clipboard.setStringAsync('');
@@ -50,7 +52,6 @@ export default function ExploreScreen() {
             if (lastProcessed === task.text) {
               await AsyncStorage.removeItem('@ai_task_organizer_last_clipboard');
             }
-
             loadTasks();
           }
         }
@@ -80,11 +81,9 @@ export default function ExploreScreen() {
 
   const handleToggleDone = async (task: Task) => {
     const newStatus = !task.isDone;
-    // Optimistically update UI
     setTasks(prev =>
       prev.map(t => t.id === task.id ? { ...t, isDone: newStatus } : t)
     );
-    // Persist changes
     await updateTaskStatus(task.id, newStatus);
   };
 
@@ -94,22 +93,12 @@ export default function ExploreScreen() {
   };
 
   const handleSaveTask = async (updatedTask: Task) => {
-    // Optimistically update UI
     setTasks(prev =>
       prev.map(t => t.id === updatedTask.id ? updatedTask : t)
     );
-    // Presist to storage
     await updateTask(updatedTask);
     setIsModalVisible(false);
     setSelectedTask(null);
-  };
-
-  const getPriorityColor = (priority: string) => {
-    switch (priority.toLowerCase()) {
-      case "high": return "#EF4444"; // Vibrant Red
-      case "low": return "#10B981";  // Vibrant Green
-      default: return "#F59E0B";      // Vibrant Amber
-    }
   };
 
   const renderItem = ({ item }: { item: Task }) => {
@@ -119,62 +108,70 @@ export default function ExploreScreen() {
       <TouchableOpacity
         style={[styles.taskCard, isDone && styles.taskCardDone]}
         onLongPress={() => handleLongPress(item)}
-        onPress={() => handleOpenEdit(item)}
         activeOpacity={0.8}
       >
-        <View style={styles.cardHeader}>
-          <TouchableOpacity
-            onPress={() => handleToggleDone(item)}
-            style={styles.checkButton}
-          >
-            <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
-              {isDone && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
-            </View>
-          </TouchableOpacity>
-
-          <View style={styles.priorityIndicatorContainer}>
-            <View style={[styles.priorityDot, { backgroundColor: getPriorityColor(item.priority) }]} />
-            <Text style={styles.priorityText}>{item.priority.toUpperCase()}</Text>
-          </View>
-        </View>
-
-        <Text style={[styles.taskTitle, isDone && styles.textStrikethrough]}>
-          {item.text}
-        </Text>
-
-        <View style={styles.metricsRow}>
-          <Text style={styles.metricPill}>{item.intent}</Text>
-          <Text style={styles.metricPill}>{item.category}</Text>
-          {item.location ? (
+        <LinearGradient
+          colors={isDone ? ["#F8FAFC", "#F1F5F9"] : ["#FFFFFF", "#F8FAFC"]}
+          style={styles.cardGradient}
+        >
+          <View style={styles.cardHeader}>
             <TouchableOpacity
-              style={styles.metricLocationPill}
-              onPress={() => {
-                const q = encodeURIComponent(item.location as string);
-                Linking.openURL(Platform.OS === 'ios' ? `maps://?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`);
-              }}
+              onPress={() => handleToggleDone(item)}
+              style={styles.checkButton}
             >
-              <Ionicons name="location" size={12} color="#8B5CF6" style={{ marginRight: 4 }} />
-              <Text style={styles.metricLocationPillText}>📍 {item.location}</Text>
+              <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
+                {isDone && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
+              </View>
             </TouchableOpacity>
-          ) : null}
-        </View>
 
-        {(item.date || item.time) && (
-          <View style={styles.dateRow}>
-            {item.date ? (
-              <View style={styles.dateTimeChip}>
-                <Ionicons name="calendar-outline" size={14} color="#6366F1" />
-                <Text style={styles.dateText}>{item.date}</Text>
-              </View>
-            ) : null}
-            {item.time ? (
-              <View style={styles.dateTimeChip}>
-                <Ionicons name="time-outline" size={14} color="#6366F1" />
-                <Text style={styles.dateText}>{item.time}</Text>
-              </View>
+            <View style={styles.priorityIndicatorContainer}>
+              <View style={[styles.priorityDot, { backgroundColor: item.priority === "high" ? "#EF4444" : item.priority === "low" ? "#10B981" : "#F59E0B" }]} />
+              <Text style={styles.priorityText}>{item.priority.toUpperCase()}</Text>
+            </View>
+          </View>
+
+          <Text style={[styles.taskTitle, isDone && styles.textStrikethrough]}>
+            {item.text}
+          </Text>
+
+          <View style={styles.metricsRow}>
+            <View style={styles.metricPill}>
+              <Text style={styles.metricPillText}>{item.intent}</Text>
+            </View>
+            <View style={[styles.metricPill, { backgroundColor: "#FDF4FF" }]}>
+              <Text style={[styles.metricPillText, { color: "#C026D3" }]}>{item.category}</Text>
+            </View>
+            {item.location ? (
+              <TouchableOpacity
+                style={styles.metricLocationPill}
+                onPress={() => {
+                  const q = encodeURIComponent(item.location as string);
+                  Linking.openURL(Platform.OS === 'ios' ? `maps://?q=${q}` : `https://www.google.com/maps/search/?api=1&query=${q}`);
+                }}
+              >
+                <Ionicons name="location" size={12} color="#8B5CF6" style={{ marginRight: 4 }} />
+                <Text style={styles.metricLocationPillText}>{item.location}</Text>
+              </TouchableOpacity>
             ) : null}
           </View>
-        )}
+
+          {(item.date || item.time) && (
+            <View style={styles.dateRow}>
+              {item.date ? (
+                <View style={styles.dateTimeChip}>
+                  <Ionicons name="calendar-outline" size={14} color="#6366F1" />
+                  <Text style={styles.dateText}>{item.date}</Text>
+                </View>
+              ) : null}
+              {item.time ? (
+                <View style={styles.dateTimeChip}>
+                  <Ionicons name="time-outline" size={14} color="#6366F1" />
+                  <Text style={styles.dateText}>{item.time}</Text>
+                </View>
+              ) : null}
+            </View>
+          )}
+        </LinearGradient>
       </TouchableOpacity>
     );
   };
@@ -190,8 +187,13 @@ export default function ExploreScreen() {
           <Text style={styles.greeting}>Your schedule</Text>
           <Text style={styles.title}>All Tasks</Text>
         </View>
-        <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll}>
-          <Ionicons name="trash-outline" size={20} color="#EF4444" />
+        <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll} activeOpacity={0.7}>
+          <LinearGradient
+            colors={["#FEE2E2", "#FECACA"]}
+            style={styles.clearBtnGradient}
+          >
+            <Ionicons name="trash-outline" size={20} color="#EF4444" />
+          </LinearGradient>
         </TouchableOpacity>
       </View>
 
@@ -209,6 +211,7 @@ export default function ExploreScreen() {
                 selectedCategory === cat && styles.categoryTabActive
               ]}
               onPress={() => setSelectedCategory(cat)}
+              activeOpacity={0.8}
             >
               <Text style={[
                 styles.categoryTabText,
@@ -223,7 +226,7 @@ export default function ExploreScreen() {
 
       {filteredTasks.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="sparkles-outline" size={48} color="#CBD5E1" />
+          <Ionicons name="sparkles-outline" size={64} color="#CBD5E1" />
           <Text style={styles.emptyTitle}>All caught up!</Text>
           <Text style={styles.emptyText}>No tasks found in this category.</Text>
         </View>
@@ -250,7 +253,7 @@ export default function ExploreScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F8FAFC", // Deep slate background
+    backgroundColor: "#F8FAFC",
     paddingTop: 60,
   },
   header: {
@@ -262,43 +265,54 @@ const styles = StyleSheet.create({
   },
   greeting: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
     color: "#94A3B8",
     textTransform: "uppercase",
-    letterSpacing: 1.2,
-    marginBottom: 4,
+    letterSpacing: 1.5,
+    marginBottom: 6,
   },
   title: {
-    fontSize: 32,
+    fontSize: 34,
     fontWeight: "800",
     color: "#0F172A",
-    letterSpacing: -0.5,
+    letterSpacing: -1,
   },
   clearBtn: {
-    backgroundColor: "#FEE2E2",
-    padding: 10,
-    borderRadius: 12,
+    borderRadius: 14,
+    overflow: "hidden",
+    shadowColor: "#EF4444",
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  clearBtnGradient: {
+    padding: 12,
+    alignItems: "center",
+    justifyContent: "center",
   },
   listContent: {
     paddingHorizontal: 24,
     paddingBottom: 40,
   },
   taskCard: {
-    backgroundColor: "#FFFFFF",
     borderRadius: 24,
-    padding: 20,
-    marginBottom: 16,
+    marginBottom: 20,
+    backgroundColor: "#FFFFFF",
     shadowColor: "#64748B",
-    shadowOpacity: 0.08,
-    shadowRadius: 16,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    shadowOpacity: 0.1,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
     borderWidth: 1,
     borderColor: "#F1F5F9",
+    overflow: 'hidden',
+  },
+  cardGradient: {
+    padding: 24,
   },
   taskCardDone: {
-    opacity: 0.5,
-    backgroundColor: "#F8FAFC",
+    opacity: 0.6,
     shadowOpacity: 0,
     elevation: 0,
   },
@@ -306,7 +320,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 16,
   },
   checkButton: {
     padding: 4,
@@ -315,9 +329,9 @@ const styles = StyleSheet.create({
   checkbox: {
     width: 28,
     height: 28,
-    borderRadius: 8,
+    borderRadius: 10,
     borderWidth: 2,
-    borderColor: "#E2E8F0",
+    borderColor: "#CBD5E1",
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#FFFFFF',
@@ -330,8 +344,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#F1F5F9',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderRadius: 99,
   },
   priorityDot: {
@@ -342,17 +356,17 @@ const styles = StyleSheet.create({
   },
   priorityText: {
     fontSize: 11,
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#475569",
     letterSpacing: 0.5,
   },
   taskTitle: {
-    fontSize: 18,
-    fontWeight: "600",
+    fontSize: 20,
+    fontWeight: "700",
     color: "#0F172A",
     marginBottom: 16,
-    lineHeight: 26,
-    letterSpacing: -0.2,
+    lineHeight: 28,
+    letterSpacing: -0.5,
   },
   textStrikethrough: {
     textDecorationLine: "line-through",
@@ -360,39 +374,40 @@ const styles = StyleSheet.create({
   },
   metricsRow: {
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 20,
+    flexWrap: "wrap",
   },
   metricPill: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#6366F1",
     backgroundColor: "#EEF2FF",
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    overflow: "hidden",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 10,
+  },
+  metricPillText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#6366F1",
   },
   metricLocationPill: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#EDE9FE",
     paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 8,
-    overflow: "hidden",
+    paddingVertical: 6,
+    borderRadius: 10,
   },
   metricLocationPillText: {
-    fontSize: 12,
-    fontWeight: "600",
+    fontSize: 13,
+    fontWeight: "700",
     color: "#8B5CF6",
   },
   dateRow: {
     flexDirection: "row",
-    gap: 12,
+    gap: 16,
     marginTop: 4,
     borderTopWidth: 1,
-    borderTopColor: "#F1F5F9",
+    borderTopColor: "#E2E8F0",
     paddingTop: 16,
   },
   dateTimeChip: {
@@ -402,8 +417,8 @@ const styles = StyleSheet.create({
   },
   dateText: {
     fontSize: 13,
-    color: "#64748B",
-    fontWeight: "500",
+    color: "#475569",
+    fontWeight: "600",
   },
   emptyContainer: {
     flex: 1,
@@ -412,44 +427,47 @@ const styles = StyleSheet.create({
     marginTop: 60,
   },
   emptyTitle: {
-    fontSize: 20,
-    fontWeight: "700",
-    color: "#475569",
-    marginTop: 16,
+    fontSize: 22,
+    fontWeight: "800",
+    color: "#334155",
+    marginTop: 20,
     marginBottom: 8,
+    letterSpacing: -0.5,
   },
   emptyText: {
-    fontSize: 15,
+    fontSize: 16,
     color: "#94A3B8",
+    fontWeight: "500",
   },
   categoriesWrapper: {
     marginBottom: 24,
   },
   categoriesContent: {
     paddingHorizontal: 24,
-    gap: 8,
+    gap: 12,
+    alignItems: "center",
   },
   categoryTab: {
-    paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
     borderRadius: 99,
     backgroundColor: "#FFFFFF",
-    marginRight: 8,
-    shadowColor: "#64748B",
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 2 },
+    marginRight: 0,
     borderWidth: 1,
     borderColor: "#E2E8F0",
   },
   categoryTabActive: {
     backgroundColor: "#0F172A",
     borderColor: "#0F172A",
-    shadowOpacity: 0.15,
+    shadowColor: "#0F172A",
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
   },
   categoryTabText: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "700",
     color: "#64748B",
   },
   categoryTabTextActive: {

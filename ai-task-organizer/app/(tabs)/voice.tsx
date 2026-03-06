@@ -3,6 +3,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useState } from "react";
 import * as DocumentPicker from 'expo-document-picker';
 import { parseTaskText } from "../../src/ai/taskParser";
+import { parseTaskWithFallback } from "../../src/ai/fallbackParser";
 import { transcribeAudioWithGroq } from "../../src/ai/groqAudio";
 import { extractTasksFromText } from "../../src/ai/geminiAudio";
 import { MLRawTask } from "../../src/ai/mlParser";
@@ -65,16 +66,18 @@ export default function VoiceTab() {
             } catch (err) {
                 // Fallback to offline parser if Gemini fails (e.g. rate limit)
                 console.log('Falling back to offline parser...', err);
-                const parsed = parseTaskText(transcribedText);
+                const parsed = await parseTaskWithFallback(transcribedText);
                 setRawText(transcribedText);
-                setExtractedTasks([{
-                    text: transcribedText,
-                    intent: parsed.intent,
-                    date: parsed.date,
-                    time: parsed.time,
-                    priority: parsed.priority as any,
-                    category: parsed.category,
-                }]);
+                if (parsed) {
+                    setExtractedTasks([{
+                        text: parsed.text || transcribedText,
+                        intent: parsed.intent,
+                        date: parsed.date,
+                        time: parsed.time,
+                        priority: parsed.priority as any,
+                        category: parsed.category,
+                    }]);
+                }
             }
 
         } catch (error: any) {
