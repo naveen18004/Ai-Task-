@@ -127,6 +127,20 @@ export default function HomeTab() {
                   <Text style={styles.statusLocationText}>{task.location}</Text>
                 </TouchableOpacity>
               ) : null}
+              {task.weatherAlert ? (
+                <View style={[styles.statusLocation, { backgroundColor: "#FFE4E6" }]}>
+                  {task.weatherAlert.condition.includes("Rain") || task.weatherAlert.condition.includes("Storm") ? (
+                    <Ionicons name="rainy" size={16} color="#E11D48" />
+                  ) : task.weatherAlert.condition.includes("Snow") ? (
+                    <Ionicons name="snow" size={16} color="#E11D48" />
+                  ) : (
+                    <Ionicons name="warning-outline" size={16} color="#E11D48" />
+                  )}
+                  <Text style={[styles.statusLocationText, { color: "#E11D48" }]}>
+                    {task.weatherAlert.condition} ({task.weatherAlert.temp}°)
+                  </Text>
+                </View>
+              ) : null}
             </View>
           ))
         )}

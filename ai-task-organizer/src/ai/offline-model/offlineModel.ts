@@ -1,4 +1,4 @@
-import { FileSystem } from 'expo-file-system';
+import * as FileSystem from 'expo-file-system';
 import { Platform } from 'react-native';
 import type { LlamaContext } from 'llama.rn';
 

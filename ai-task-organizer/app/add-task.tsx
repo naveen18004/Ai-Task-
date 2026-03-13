@@ -4,10 +4,13 @@ import { router } from "expo-router";
 
 import { parseTaskText } from "@/src/ai/taskParser";
 import { setupNotifications, scheduleReminder } from "@/src/notifications/notificationService";
+import { startGeofenceForTask, geocodeLocationString } from "@/src/notifications/locationService";
+import { getWeatherForTask } from "@/src/weather/weatherService";
 import { saveTaskStr, Task, getApiKey, getGroqApiKey } from "@/src/storage/asyncStorage";
 import * as FileSystem from 'expo-file-system/legacy';
 import { Audio } from 'expo-av';
 import { transcribeAudioWithGroq } from "@/src/ai/groqAudio";
+import { enhanceTaskWithAI } from "@/src/ai/aiEnhancer";
 
 export default function AddTask() {
   const [taskText, setTaskText] = useState("");
@@ -20,62 +23,108 @@ export default function AddTask() {
       return;
     }
 
-    // Ask notification permission
-    await setupNotifications();
+    setIsProcessingAudio(true); // Re-using state for general loading
 
-    // AI parsing
-    const parsed = parseTaskText(taskText);
-    console.log("AI OUTPUT:", parsed);
+    try {
+      // Ask notification permission
+      await setupNotifications();
 
-    const newTask: Task = {
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
-      text: taskText.trim(),
-      intent: parsed.intent,
-      category: parsed.category,
-      date: parsed.date,
-      time: parsed.time,
-      priority: parsed.priority,
-      location: parsed.location,
-      createdAt: new Date().toISOString()
-    };
+      // AI parsing
+      const parsed = parseTaskText(taskText);
+      console.log("AI OUTPUT:", parsed);
 
-    const saved = await saveTaskStr(newTask);
-    if (!saved) {
-      Alert.alert("Duplicate Task", "This exact task is already in your list.");
-      router.back();
-      return;
-    }
+      let subTasks: string[] = [];
+      let estimatedMinutes: number | undefined;
 
-    // If date & time exist, schedule reminder
-    if (parsed.date && parsed.time) {
-      // Normalize: "2 PM" -> "2:00 PM"
-      const normalizedTime = parsed.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
-      const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-      const baseDateMs = new Date(parsed.date).setHours(0, 0, 0, 0);
-
-      if (timeMatch && !isNaN(baseDateMs)) {
-        let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
-        const period = (timeMatch[3] || '').toUpperCase();
-        if (period === 'PM' && h !== 12) h += 12;
-        if (period === 'AM' && h === 12) h = 0;
-        const base = new Date(baseDateMs);
-        const reminderDate = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
-        const now = new Date();
-
-        if (reminderDate > now) {
-          await scheduleReminder("Task Reminder", taskText, reminderDate);
-          Alert.alert("Reminder Set", `Task saved and reminder scheduled for ${parsed.time}`);
-        } else {
-          Alert.alert("Task Saved", "Task saved, but the time is already in the past — no reminder scheduled.");
-        }
-      } else {
-        Alert.alert("Task Saved", "Task saved. Could not parse the time for a reminder.");
+      // Try AI enhancements if API key exists
+      const apiKey = await getApiKey();
+      if (apiKey) {
+        const enhanced = await enhanceTaskWithAI(taskText, apiKey);
+        subTasks = enhanced.subTasks;
+        estimatedMinutes = enhanced.estimatedMinutes;
       }
-    } else {
-      Alert.alert("Task Saved", "No date/time detected, reminder not set");
-    }
 
-    router.back();
+      let locationCoords;
+      let weatherAlert;
+
+      if (parsed.location) {
+        locationCoords = await geocodeLocationString(parsed.location);
+
+        // If we have coordinates and a target date, fetch the forecast
+        if (locationCoords && parsed.date) {
+          const d = new Date(parsed.date);
+          if (!isNaN(d.getTime())) {
+            weatherAlert = await getWeatherForTask(locationCoords.latitude, locationCoords.longitude, d.toISOString());
+          }
+        }
+      }
+
+      const newTask: Task = {
+        id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
+        text: parsed.text || taskText.trim(), // Use summary
+        intent: parsed.intent,
+        category: parsed.category,
+        date: parsed.date,
+        time: parsed.time,
+        priority: parsed.priority,
+        location: parsed.location,
+        locationCoords: locationCoords || undefined,
+        createdAt: new Date().toISOString(),
+        smartScore: parsed.smartScore,
+        subTasks,
+        estimatedMinutes,
+        weatherAlert
+      };
+
+      const saved = await saveTaskStr(newTask);
+      if (!saved) {
+        Alert.alert("Duplicate Task", "This exact task is already in your list.");
+        router.back();
+        return;
+      }
+
+      // If Location exists & geocoded, start Geofence
+      if (parsed.location && locationCoords) {
+        await startGeofenceForTask(newTask.id, newTask.text, locationCoords.latitude, locationCoords.longitude);
+        Alert.alert("Geofence Set", `Reminders will trigger when you arrive at ${parsed.location}.`);
+      }
+
+      // If date & time exist, schedule reminder
+      if (parsed.date && parsed.time) {
+        // Normalize: "2 PM" -> "2:00 PM"
+        const normalizedTime = parsed.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
+        const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+        const baseDateMs = new Date(parsed.date).setHours(0, 0, 0, 0);
+
+        if (timeMatch && !isNaN(baseDateMs)) {
+          let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
+          const period = (timeMatch[3] || '').toUpperCase();
+          if (period === 'PM' && h !== 12) h += 12;
+          if (period === 'AM' && h === 12) h = 0;
+          const base = new Date(baseDateMs);
+          const reminderDate = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
+          const now = new Date();
+
+          if (reminderDate > now) {
+            await scheduleReminder("Task Reminder", taskText, reminderDate);
+            Alert.alert("Reminder Set", `Task saved and reminder scheduled for ${parsed.time}`);
+          } else {
+            Alert.alert("Task Saved", "Task saved, but the time is already in the past — no reminder scheduled.");
+          }
+        } else {
+          Alert.alert("Task Saved", "Task saved. Could not parse the time for a reminder.");
+        }
+      } else if (!parsed.location) {
+        Alert.alert("Task Saved", "No date/time detected, reminder not set");
+      }
+
+      router.back();
+    } catch (e) {
+      console.error("Save Task Error", e);
+      Alert.alert("Error", "Failed to save the task.");
+    } finally {
+      setIsProcessingAudio(false);
+    }
   };
 
   const startRecording = async () => {

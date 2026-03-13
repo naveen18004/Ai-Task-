@@ -6,6 +6,7 @@ export interface ParsedTask {
   category: string;
   priority: string;
   location?: string;
+  smartScore?: number;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -109,6 +110,9 @@ export function parseTaskText(text: string): ParsedTask {
   // 1. Relative keywords
   if (lower.match(/\btoday\b|\btonight\b/)) {
     date = toDateStr(now);
+  } else if (lower.match(/\byesterday\b/)) {
+    const d = new Date(now); d.setDate(d.getDate() - 1);
+    date = toDateStr(d);
   } else if (lower.match(/\btomorrow\b/)) {
     const d = new Date(now); d.setDate(d.getDate() + 1);
     date = toDateStr(d);
@@ -237,8 +241,11 @@ export function parseTaskText(text: string): ParsedTask {
   const locMatch = text.match(/\b(?:at|in)\s+([A-Z][a-zA-Z0-9\s,']+(?:Room|Hall|Coffee|Cafe|Building|Block|Restaurant|Center|Centre|Campus|Office|Shop|Store|Hospital|Clinic|School|University|College)?)\b/);
   if (locMatch) {
     // simple heuristic: if it looks capitalized and isn't a time word
-    const locCandid = locMatch[1].trim();
-    if (!/^\d/.test(locCandid) && !/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(locCandid)) {
+    let locCandid = locMatch[1].trim();
+    // Exclude time words from the captured location
+    locCandid = locCandid.replace(/\b(tomorrow|today|yesterday|tonight|morning|afternoon|evening|night|noon|midnight|at \d.*)\b/gi, '').trim();
+
+    if (locCandid && !/^\d/.test(locCandid) && !/^(monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december)$/i.test(locCandid)) {
       location = locCandid;
     }
   }
@@ -270,6 +277,23 @@ export function parseTaskText(text: string): ParsedTask {
     summary = summary.substring(0, 57).trim() + '...';
   }
 
+  // ── Smart Score (Eisenhower matrix numeric mapping) ─────────────────────
+  let smartScore = 0;
+  // Importance: Base score mapping
+  if (priority === 'high') smartScore += 50;
+  if (priority === 'medium') smartScore += 25;
+  if (priority === 'low') smartScore += 10;
+
+  // Urgency: Date mapping
+  if (date) {
+    const dDate = new Date(date).getTime();
+    const today = new Date(toDateStr(now)).getTime();
+    if (dDate < today) smartScore += 60; // Overdue = highly urgent
+    else if (dDate === today) smartScore += 40; // Due today
+    else if (dDate - today <= 2 * 24 * 60 * 60 * 1000) smartScore += 20; // within 2 days
+    else if (dDate - today <= 7 * 24 * 60 * 60 * 1000) smartScore += 10; // within week
+  }
+
   return {
     text: summary, // OVERRIDE the raw text with our neat summary
     intent,
@@ -277,6 +301,7 @@ export function parseTaskText(text: string): ParsedTask {
     time,
     category,
     priority,
-    location
+    location,
+    smartScore
   };
 }

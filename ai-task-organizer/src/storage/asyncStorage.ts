@@ -9,8 +9,13 @@ export interface Task {
   time: string;
   priority: string;
   location?: string;
+  locationCoords?: { latitude: number; longitude: number };
   createdAt: string;
   isDone?: boolean;
+  subTasks?: string[];
+  estimatedMinutes?: number;
+  smartScore?: number;
+  weatherAlert?: { condition: string, temp: number };
 }
 
 // Helper: Calculate Jaccard similarity between two strings using character bigrams

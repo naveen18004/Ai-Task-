@@ -15,17 +15,24 @@ export default function ExploreScreen() {
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
+  const [isSmartSort, setIsSmartSort] = useState(false);
 
   const loadTasks = async () => {
     const fetchedTasks = await getTasks();
-    fetchedTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (isSmartSort) {
+      // Sort by smartScore (highest first), fallback to creation date
+      fetchedTasks.sort((a, b) => (b.smartScore || 0) - (a.smartScore || 0) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    } else {
+      // Sort by creation date
+      fetchedTasks.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    }
     setTasks(fetchedTasks);
   };
 
   useFocusEffect(
     useCallback(() => {
       loadTasks();
-    }, [])
+    }, [isSmartSort])
   );
 
   const handleLongPress = (task: Task) => {
@@ -153,9 +160,23 @@ export default function ExploreScreen() {
                 <Text style={styles.metricLocationPillText}>{item.location}</Text>
               </TouchableOpacity>
             ) : null}
+            {item.weatherAlert ? (
+              <View style={[styles.metricLocationPill, { backgroundColor: "#FFE4E6" }]}>
+                {item.weatherAlert.condition.includes("Rain") || item.weatherAlert.condition.includes("Storm") ? (
+                  <Ionicons name="rainy" size={12} color="#E11D48" style={{ marginRight: 4 }} />
+                ) : item.weatherAlert.condition.includes("Snow") ? (
+                  <Ionicons name="snow" size={12} color="#E11D48" style={{ marginRight: 4 }} />
+                ) : (
+                  <Ionicons name="warning-outline" size={12} color="#E11D48" style={{ marginRight: 4 }} />
+                )}
+                <Text style={[styles.metricLocationPillText, { color: "#E11D48" }]}>
+                  {item.weatherAlert.condition} ({item.weatherAlert.temp}°)
+                </Text>
+              </View>
+            ) : null}
           </View>
 
-          {(item.date || item.time) && (
+          {(item.date || item.time || item.estimatedMinutes) && (
             <View style={styles.dateRow}>
               {item.date ? (
                 <View style={styles.dateTimeChip}>
@@ -169,8 +190,27 @@ export default function ExploreScreen() {
                   <Text style={styles.dateText}>{item.time}</Text>
                 </View>
               ) : null}
+              {item.estimatedMinutes ? (
+                <View style={styles.dateTimeChip}>
+                  <Ionicons name="hourglass-outline" size={14} color="#F59E0B" />
+                  <Text style={styles.dateText}>{item.estimatedMinutes} min</Text>
+                </View>
+              ) : null}
             </View>
           )}
+
+          {item.subTasks && item.subTasks.length > 0 && (
+            <View style={styles.subTaskContainer}>
+              <Text style={styles.subTaskHeader}>Sub-tasks:</Text>
+              {item.subTasks.map((sub, idx) => (
+                <View key={idx} style={styles.subTaskRow}>
+                  <Ionicons name="ellipse" size={6} color="#94A3B8" />
+                  <Text style={[styles.subTaskText, isDone && styles.textStrikethrough]}>{sub}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
         </LinearGradient>
       </TouchableOpacity>
     );
@@ -187,14 +227,24 @@ export default function ExploreScreen() {
           <Text style={styles.greeting}>Your schedule</Text>
           <Text style={styles.title}>All Tasks</Text>
         </View>
-        <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll} activeOpacity={0.7}>
-          <LinearGradient
-            colors={["#FEE2E2", "#FECACA"]}
-            style={styles.clearBtnGradient}
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            style={[styles.sortBtn, isSmartSort && styles.sortBtnActive]}
+            onPress={() => setIsSmartSort(!isSmartSort)}
           >
-            <Ionicons name="trash-outline" size={20} color="#EF4444" />
-          </LinearGradient>
-        </TouchableOpacity>
+            <Ionicons name="color-wand-outline" size={20} color={isSmartSort ? "#ffffff" : "#6366F1"} />
+            <Text style={[styles.sortBtnText, isSmartSort && styles.sortBtnTextActive]}>Smart</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.clearBtn} onPress={handleClearAll} activeOpacity={0.7}>
+            <LinearGradient
+              colors={["#FEE2E2", "#FECACA"]}
+              style={styles.clearBtnGradient}
+            >
+              <Ionicons name="trash-outline" size={20} color="#EF4444" />
+            </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={styles.categoriesWrapper}>
@@ -276,6 +326,31 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     color: "#0F172A",
     letterSpacing: -1,
+  },
+  headerRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  sortBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#EEF2FF",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+    gap: 6
+  },
+  sortBtnActive: {
+    backgroundColor: "#6366F1",
+  },
+  sortBtnText: {
+    color: "#6366F1",
+    fontWeight: "700",
+    fontSize: 14,
+  },
+  sortBtnTextActive: {
+    color: "#FFFFFF",
   },
   clearBtn: {
     borderRadius: 14,
@@ -419,6 +494,31 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#475569",
     fontWeight: "600",
+  },
+  subTaskContainer: {
+    marginTop: 16,
+    backgroundColor: "#F8FAFC",
+    borderRadius: 12,
+    padding: 16,
+  },
+  subTaskHeader: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#94A3B8",
+    textTransform: "uppercase",
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+  subTaskRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 6,
+    gap: 10,
+  },
+  subTaskText: {
+    fontSize: 14,
+    color: "#475569",
+    fontWeight: "500",
   },
   emptyContainer: {
     flex: 1,

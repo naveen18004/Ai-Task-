@@ -58,6 +58,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="insights"
+        options={{
+          title: 'Insights',
+          tabBarIcon: ({ color }) => <IconSymbol size={26} name="chart.bar.fill" color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="voice"
         options={{
           title: 'Voice Check',
