@@ -1,21 +1,57 @@
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert, ScrollView, Linking, Platform } from "react-native";
-import { useState, useCallback } from "react";
-import { useFocusEffect } from "expo-router";
-import { getTasks, deleteTask, clearAllTasks, updateTaskStatus, updateTask, removeClipboardProcessed, Task } from "@/src/storage/asyncStorage";
-import { Ionicons } from "@expo/vector-icons";
 import EditTaskModal from "@/components/EditTaskModal";
-import * as Clipboard from 'expo-clipboard';
+import { retrainModelOnCorrection } from "@/src/ai/custom-model/retrainer";
+import { clearAllTasks, deleteTask, getNextAvailableDate, getTasks, removeClipboardProcessed, Task, updateTask, updateTaskStatus } from "@/src/storage/asyncStorage";
+import { handleAIAgentAction } from "@/src/utils/aiAgentHelper";
+import { Ionicons } from "@expo/vector-icons";
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from "expo-linear-gradient";
+import { useFocusEffect } from "expo-router";
+import * as Speech from 'expo-speech';
+import { useCallback, useEffect, useState } from "react";
+import { Alert, FlatList, Linking, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 
 const CATEGORIES = ["All", "Work", "Personal", "Education", "Health", "General"];
 
 export default function ExploreScreen() {
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState("All");
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isModalVisible, setIsModalVisible] = useState(false);
   const [isSmartSort, setIsSmartSort] = useState(false);
+  const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
+  const [focusTimeLeft, setFocusTimeLeft] = useState<number>(25 * 60);
+
+  useEffect(() => {
+    let interval: any;
+    if (focusTaskId && focusTimeLeft > 0) {
+      interval = setInterval(() => {
+        setFocusTimeLeft(prev => prev - 1);
+      }, 1000);
+    } else if (focusTimeLeft === 0 && focusTaskId) {
+      Speech.speak("Focus session complete! Excellent work. I have marked the task as done.", { rate: 1.0 });
+      const completedTask = tasks.find(t => t.id === focusTaskId);
+      if (completedTask) handleToggleDone(completedTask);
+      setFocusTaskId(null);
+    }
+    return () => clearInterval(interval);
+  }, [focusTaskId, focusTimeLeft, tasks]);
+
+  const toggleFocus = (taskId: string) => {
+    if (focusTaskId === taskId) {
+      setFocusTaskId(null);
+    } else {
+      setFocusTaskId(taskId);
+      setFocusTimeLeft(25 * 60);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
 
   const loadTasks = async () => {
     const fetchedTasks = await getTasks();
@@ -52,13 +88,12 @@ export default function ExploreScreen() {
             await deleteTask(task.id);
             await removeClipboardProcessed(task.text);
             const currentClip = await Clipboard.getStringAsync();
-            if (currentClip === task.text) {
+            if (currentClip && (currentClip === task.text || currentClip.includes(task.text) || task.text.includes(currentClip))) {
               await Clipboard.setStringAsync('');
             }
-            const lastProcessed = await AsyncStorage.getItem('@ai_task_organizer_last_clipboard');
-            if (lastProcessed === task.text) {
-              await AsyncStorage.removeItem('@ai_task_organizer_last_clipboard');
-            }
+            // Always reset the anti-spam clipboard memory when a task is deleted 
+            // so the user can re-copy it if they want.
+            await AsyncStorage.removeItem('@ai_task_organizer_last_clipboard');
             loadTasks();
           }
         }
@@ -100,16 +135,101 @@ export default function ExploreScreen() {
   };
 
   const handleSaveTask = async (updatedTask: Task) => {
-    setTasks(prev =>
-      prev.map(t => t.id === updatedTask.id ? updatedTask : t)
-    );
-    await updateTask(updatedTask);
-    setIsModalVisible(false);
-    setSelectedTask(null);
+    const finalizeExploreSave = async (t: Task) => {
+      // CONTINUOUS LEARNING HOOK: If user corrects AI, retrain the probability weights
+      if (selectedTask && (selectedTask.intent !== t.intent || selectedTask.category !== t.category)) {
+        await retrainModelOnCorrection(t.text, t.intent || 'task');
+      }
+
+      setTasks(prev =>
+        prev.map(task => task.id === t.id ? t : task)
+      );
+      await updateTask(t);
+      setIsModalVisible(false);
+      setSelectedTask(null);
+    };
+
+    if (updatedTask.date && updatedTask.date !== selectedTask?.date) {
+      const nextDate = await getNextAvailableDate(updatedTask.date);
+      if (nextDate && nextDate !== updatedTask.date) {
+        Alert.alert("Busy Schedule", `You already have 5 tasks on ${updatedTask.date}. Do you want to auto-reschedule this to ${nextDate}?`, [
+          { text: "Keep Original", onPress: () => finalizeExploreSave(updatedTask) },
+          { text: `Move to ${nextDate}`, onPress: () => finalizeExploreSave({ ...updatedTask, date: nextDate }) }
+        ]);
+        return;
+      }
+    }
+    await finalizeExploreSave(updatedTask);
+  };
+
+  const handleIntentAction = async (task: Task) => {
+    if (task.intent === 'call') {
+      const phoneRegex = /\+?1?\s*\(?-*\.*(\d{3})\)?\.*-*\s*(\d{3})\.*-*\s*(\d{4})/;
+      const match = task.text.match(phoneRegex);
+
+      const phoneUrl = match ? `tel:${match[0].replace(/[^0-9+]/g, '')}` : 'tel:';
+      const canOpen = await Linking.canOpenURL(phoneUrl);
+
+      if (canOpen) {
+        Linking.openURL(phoneUrl);
+      } else {
+        Alert.alert("Action Not Supported", "Your device does not support this action or no valid phone number was found.");
+      }
+    } else if (task.intent === 'meeting') {
+      const urlRegex = /(https?:\/\/[^\s]+)/;
+      const match = task.text.match(urlRegex);
+      if (match) {
+        Linking.openURL(match[0]);
+      } else {
+        Alert.alert("No Link Found", "Please edit the task to add a valid meeting URL (e.g., zoom.us/j/...).");
+      }
+    }
+  };
+
+  const startDailyAudioBriefing = () => {
+    if (isSpeaking) {
+      Speech.stop();
+      setIsSpeaking(false);
+      return;
+    }
+
+    const todayCount = filteredTasks.filter(t => !t.isDone).length;
+
+    if (todayCount === 0) {
+      Speech.speak("Good news! You have no pending tasks right now. Enjoy your day!", { rate: 1.0 });
+      return;
+    }
+
+    let intro = `Good morning. You have ${todayCount} actionable task${todayCount > 1 ? 's' : ''} on your radar.`;
+
+    const highPriority = filteredTasks.filter(t => !t.isDone && t.priority === 'high');
+
+    if (highPriority.length > 0) {
+      intro += ` Your top priority is to ${highPriority[0].text}.`;
+      if (highPriority.length > 1) {
+        intro += ` You also have ${highPriority.length - 1} other critical targets.`;
+      }
+    } else {
+      intro += ` There are no urgent threats detected.`;
+    }
+
+    intro += ` Would you like me to execute any actions?`;
+
+    setIsSpeaking(true);
+
+    Speech.speak(intro, {
+      language: 'en-US',
+      pitch: 1.0,
+      rate: 1.0,
+      onDone: () => setIsSpeaking(false),
+      onStopped: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false)
+    });
   };
 
   const renderItem = ({ item }: { item: Task }) => {
     const isDone = item.isDone;
+    const isLocked = item.dependencyIds?.some(depId => !tasks.find(t => t.id === depId)?.isDone);
 
     return (
       <TouchableOpacity
@@ -123,11 +243,12 @@ export default function ExploreScreen() {
         >
           <View style={styles.cardHeader}>
             <TouchableOpacity
-              onPress={() => handleToggleDone(item)}
-              style={styles.checkButton}
+              onPress={() => { if (!isLocked) handleToggleDone(item); }}
+              style={[styles.checkButton, isLocked && { opacity: 0.5 }]}
+              disabled={isLocked}
             >
-              <View style={[styles.checkbox, isDone && styles.checkboxDone]}>
-                {isDone && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
+              <View style={[styles.checkbox, isDone && styles.checkboxDone, isLocked && { backgroundColor: '#F1F5F9', borderColor: '#CBD5E1' } as any]}>
+                {isDone ? <Ionicons name="checkmark" size={18} color="#FFFFFF" /> : isLocked ? <Ionicons name="lock-closed" size={14} color="#94A3B8" /> : null}
               </View>
             </TouchableOpacity>
 
@@ -137,7 +258,10 @@ export default function ExploreScreen() {
             </View>
           </View>
 
-          <Text style={[styles.taskTitle, isDone && styles.textStrikethrough]}>
+          <Text
+            style={[styles.taskTitle, isDone && styles.textStrikethrough]}
+            numberOfLines={2}
+          >
             {item.text}
           </Text>
 
@@ -211,6 +335,66 @@ export default function ExploreScreen() {
             </View>
           )}
 
+          {!isDone && (
+            <TouchableOpacity
+              style={{ backgroundColor: focusTaskId === item.id ? '#FEE2E2' : '#F3F4F6', padding: 12, borderRadius: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onPress={() => toggleFocus(item.id)}
+            >
+              <Ionicons name={focusTaskId === item.id ? "stop-circle" : "timer"} size={16} color={focusTaskId === item.id ? "#EF4444" : "#4B5563"} />
+              <Text style={{ color: focusTaskId === item.id ? '#EF4444' : '#4B5563', fontWeight: '700', fontSize: 14 }}>
+                {focusTaskId === item.id ? `Focusing... ${formatTime(focusTimeLeft)}` : "Start 25m Focus"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {item.intent === 'meeting' && !isDone && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#EFF6FF', padding: 12, borderRadius: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onPress={() => handleIntentAction(item)}
+            >
+              <Ionicons name="videocam" size={16} color="#3B82F6" />
+              <Text style={{ color: '#3B82F6', fontWeight: '700', fontSize: 14 }}>Join Virtual Meeting</Text>
+            </TouchableOpacity>
+          )}
+
+          {item.intent === 'email' && !isDone && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#FEF3C7', padding: 12, borderRadius: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onPress={() => handleAIAgentAction('email', item.actionContact, item.actionPayload || item.text)}
+            >
+              <Ionicons name="mail" size={16} color="#D97706" />
+              <Text style={{ color: '#D97706', fontWeight: '700', fontSize: 14 }}>Draft Email</Text>
+            </TouchableOpacity>
+          )}
+
+          {item.intent === 'sms' && !isDone && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#E0E7FF', padding: 12, borderRadius: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onPress={() => handleAIAgentAction('sms', item.actionContact, item.actionPayload || item.text)}
+            >
+              <Ionicons name="chatbubble" size={16} color="#4338CA" />
+              <Text style={{ color: '#4338CA', fontWeight: '700', fontSize: 14 }}>Send Text Message</Text>
+            </TouchableOpacity>
+          )}
+          {item.intent === 'buy' && !isDone && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#FFFBEB', padding: 12, borderRadius: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onPress={() => Linking.openURL(`https://www.amazon.com/s?k=${encodeURIComponent(item.text)}`)}
+            >
+              <Ionicons name="cart" size={16} color="#D97706" />
+              <Text style={{ color: '#D97706', fontWeight: '700', fontSize: 14 }}>Search on Amazon</Text>
+            </TouchableOpacity>
+          )}
+          {item.intent === 'call' && !isDone && (
+            <TouchableOpacity
+              style={{ backgroundColor: '#ECFDF5', padding: 12, borderRadius: 12, marginTop: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+              onPress={() => handleIntentAction(item)}
+            >
+              <Ionicons name="call" size={16} color="#059669" />
+              <Text style={{ color: '#059669', fontWeight: '700', fontSize: 14 }}>Make Phone Call</Text>
+            </TouchableOpacity>
+          )}
+
         </LinearGradient>
       </TouchableOpacity>
     );
@@ -227,7 +411,13 @@ export default function ExploreScreen() {
           <Text style={styles.greeting}>Your schedule</Text>
           <Text style={styles.title}>All Tasks</Text>
         </View>
-        <View style={styles.headerRight}>
+        <View style={[styles.headerRight, { alignItems: 'center', flexDirection: 'row' }]}>
+          <TouchableOpacity
+            style={{ backgroundColor: isSpeaking ? '#EF4444' : '#E0E7FF', padding: 8, borderRadius: 20, marginRight: 8, elevation: 1 }}
+            onPress={startDailyAudioBriefing}
+          >
+            <Ionicons name={isSpeaking ? "stop" : "volume-high"} size={20} color={isSpeaking ? "#fff" : "#4F46E5"} />
+          </TouchableOpacity>
           <TouchableOpacity
             style={[styles.sortBtn, isSmartSort && styles.sortBtnActive]}
             onPress={() => setIsSmartSort(!isSmartSort)}

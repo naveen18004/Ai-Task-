@@ -240,6 +240,8 @@ export default function OCRScreen() {
                     time: parsed.time,
                     priority: parsed.priority,
                     location: parsed.location,
+                    actionContact: parsed.actionContact,
+                    actionPayload: parsed.actionPayload,
                     createdAt: new Date().toISOString()
                 });
 
@@ -279,8 +281,10 @@ export default function OCRScreen() {
                     const saved = await saveTaskStr({
                         id: Date.now().toString() + Math.random().toString(36).substr(2, 5),
                         text: task.text, intent: task.intent, category: task.category,
-                        date: task.date, time: task.time, priority: task.priority,
+                        date: task.date, priority: task.priority,
                         location: task.location,
+                        actionContact: (task as any).actionContact,
+                        actionPayload: (task as any).actionPayload,
                         createdAt: new Date().toISOString()
                     });
                     if (saved) {

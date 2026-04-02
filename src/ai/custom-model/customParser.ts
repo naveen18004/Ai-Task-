@@ -1,5 +1,6 @@
-import model from '../../../assets/custom_model.json';
+import modelBase from '../../../assets/custom_model.json';
 import { MLRawTask } from '../mlParser';
+import { getAdaptedModel } from './retrainer';
 
 /**
  * Custom NLP Engine created from scratch.
@@ -10,7 +11,11 @@ export class CustomNLPEngine {
     private model: any;
 
     private constructor() {
-        this.model = model;
+        this.model = modelBase;
+    }
+
+    public async loadWeights() {
+        this.model = await getAdaptedModel();
     }
 
     public static getInstance(): CustomNLPEngine {

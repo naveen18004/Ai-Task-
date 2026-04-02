@@ -1,9 +1,11 @@
-import { Stack } from "expo-router";
-import { useEffect, useRef } from "react";
-import { AppState, AppStateStatus } from "react-native";
-import * as Notifications from "expo-notifications";
+import { scheduleDailyBriefing, setupNotifications } from "@/src/notifications/notificationService";
 import { processClipboard } from "@/src/utils/clipboardHelper";
-import { setupNotifications } from "@/src/notifications/notificationService";
+import { Ionicons } from "@expo/vector-icons";
+import * as LocalAuthentication from 'expo-local-authentication';
+import * as Notifications from "expo-notifications";
+import { Stack } from "expo-router";
+import { useEffect, useRef, useState } from "react";
+import { AppState, AppStateStatus, Text, TouchableOpacity, View } from "react-native";
 
 // Configure notifications to show even when the app is in the foreground
 Notifications.setNotificationHandler({
@@ -16,6 +18,8 @@ Notifications.setNotificationHandler({
 });
 
 export default function RootLayout() {
+  const [isUnlocked, setIsUnlocked] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
   const appState = useRef(AppState.currentState);
   const pollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -36,6 +40,7 @@ export default function RootLayout() {
 
   useEffect(() => {
     setupNotifications();
+    scheduleDailyBriefing();
 
     // Start polling immediately
     startPolling();
@@ -57,6 +62,49 @@ export default function RootLayout() {
       stopPolling();
     };
   }, []);
+
+  useEffect(() => {
+    const authenticateUser = async () => {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+
+      if (!hasHardware || !isEnrolled) {
+        setIsUnlocked(true); // Bypass if device has no security
+        return;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: 'Unlock AI Task Organizer',
+        fallbackLabel: 'Enter Passcode',
+        disableDeviceFallback: false,
+      });
+
+      if (result.success) {
+        setIsUnlocked(true);
+      }
+      setHasScanned(true);
+    };
+
+    authenticateUser();
+  }, []);
+
+  if (!isUnlocked) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center' }}>
+        <Ionicons name="lock-closed" size={64} color="#6366F1" />
+        <Text style={{ marginTop: 24, fontSize: 24, fontWeight: 'bold', color: '#1E293B' }}>Secure Vault</Text>
+        <Text style={{ marginTop: 8, fontSize: 16, color: '#64748B' }}>Biometric verification required</Text>
+        {hasScanned && (
+          <TouchableOpacity
+            style={{ marginTop: 32, backgroundColor: '#6366F1', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 24 }}
+            onPress={() => LocalAuthentication.authenticateAsync({ promptMessage: 'Unlock AI Task Organizer' }).then(r => r.success && setIsUnlocked(true))}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Tap to Unlock</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  }
 
   return <Stack screenOptions={{ headerShown: false }} />;
 }

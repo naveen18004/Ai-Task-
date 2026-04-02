@@ -8,6 +8,7 @@ export async function parseTaskWithFallback(text: string): Promise<ParsedTask | 
     // 2. Try Custom Offline NLP Engine for better Intent & Category mapping
     try {
         const engine = CustomNLPEngine.getInstance();
+        await engine.loadWeights();
         const tasks = engine.parseTask(text);
 
         if (tasks && tasks.length > 0 && tasks[0].intent !== 'none') {

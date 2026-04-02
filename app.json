@@ -22,7 +22,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.anonymous.aitaskorganizer",
       "permissions": [
-        "android.permission.RECORD_AUDIO"
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_CONTACTS"
       ]
     },
     "web": {
@@ -31,6 +32,18 @@
     },
     "plugins": [
       "expo-router",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow AI Task Organizer to use Face ID to secure your schedule."
+        }
+      ],
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow AI Task Organizer to securely map your contacts to automated tasks."
+        }
+      ],
       [
         "expo-splash-screen",
         {

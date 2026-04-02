@@ -16,6 +16,9 @@ export interface Task {
   estimatedMinutes?: number;
   smartScore?: number;
   weatherAlert?: { condition: string, temp: number };
+  dependencyIds?: string[];
+  actionContact?: string;
+  actionPayload?: string;
 }
 
 // Helper: Calculate Jaccard similarity between two strings using character bigrams
@@ -104,6 +107,28 @@ export const getTasks = async (): Promise<Task[]> => {
     console.error('Error fetching tasks:', error);
     return [];
   }
+};
+
+export const getNextAvailableDate = async (targetDate: string): Promise<string | null> => {
+  const existingTasks = await getTasks();
+  let currentTarget = new Date(targetDate);
+
+  if (isNaN(currentTarget.getTime())) return null;
+
+  // If there are less than 5 tasks on this date, it's safe!
+  if (existingTasks.filter(t => t.date === currentTarget.toDateString() && !t.isDone).length < 5) {
+    return null; // No conflict
+  }
+
+  // Find next consecutive day with < 5 tasks
+  for (let i = 1; i <= 30; i++) {
+    currentTarget.setDate(currentTarget.getDate() + 1);
+    const nextStr = currentTarget.toDateString();
+    if (existingTasks.filter(t => t.date === nextStr && !t.isDone).length < 5) {
+      return nextStr;
+    }
+  }
+  return null;
 };
 
 export const deleteTask = async (taskId: string): Promise<void> => {

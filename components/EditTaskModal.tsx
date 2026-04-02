@@ -1,21 +1,21 @@
-import React, { useState, useEffect } from "react";
+import { Task, getTasks } from "@/src/storage/asyncStorage";
+import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import React, { useEffect, useState } from "react";
 import {
+    Keyboard,
+    KeyboardAvoidingView,
     Modal,
-    View,
+    Platform,
+    StyleProp,
+    StyleSheet,
     Text,
     TextInput,
-    TouchableOpacity,
-    StyleSheet,
-    KeyboardAvoidingView,
-    Platform,
-    TouchableWithoutFeedback,
-    Keyboard,
-    ViewStyle,
     TextStyle,
-    StyleProp
+    TouchableOpacity,
+    TouchableWithoutFeedback,
+    View,
+    ViewStyle
 } from "react-native";
-import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
-import { Task } from "@/src/storage/asyncStorage";
 
 interface EditTaskModalProps {
     visible: boolean;
@@ -25,6 +25,7 @@ interface EditTaskModalProps {
 }
 
 const CATEGORIES = ["Work", "Personal", "Education", "Health", "General"];
+const INTENTS = ["task", "meeting", "call", "buy", "study", "review", "book"];
 const PRIORITIES = ["High", "Medium", "Low"];
 
 export default function EditTaskModal({ visible, task, onClose, onSave }: EditTaskModalProps) {
@@ -33,7 +34,11 @@ export default function EditTaskModal({ visible, task, onClose, onSave }: EditTa
     const [time, setTime] = useState("");
     const [location, setLocation] = useState("");
     const [category, setCategory] = useState("General");
+    const [intent, setIntent] = useState("task");
     const [priority, setPriority] = useState("Medium");
+
+    const [dependencyIds, setDependencyIds] = useState<string[]>([]);
+    const [allTasks, setAllTasks] = useState<Task[]>([]);
 
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showTimePicker, setShowTimePicker] = useState(false);
@@ -46,12 +51,15 @@ export default function EditTaskModal({ visible, task, onClose, onSave }: EditTa
             setTime(task.time || "");
             setLocation(task.location || "");
             setCategory(task.category || "General");
+            setIntent(task.intent || "task");
 
             const p = task.priority?.toLowerCase() || "medium";
             let matchedPriority = "Medium";
             if (p.includes("high")) matchedPriority = "High";
             if (p.includes("low")) matchedPriority = "Low";
             setPriority(matchedPriority);
+            setDependencyIds(task.dependencyIds || []);
+            getTasks().then(tasks => setAllTasks(tasks.filter(t => t.id !== task.id)));
 
             try {
                 let initDate = new Date();
@@ -87,7 +95,9 @@ export default function EditTaskModal({ visible, task, onClose, onSave }: EditTa
             time,
             location,
             category,
-            priority: priority.toLowerCase()
+            intent,
+            priority: priority.toLowerCase(),
+            dependencyIds
         });
     };
 
@@ -210,6 +220,47 @@ export default function EditTaskModal({ visible, task, onClose, onSave }: EditTa
                                         </Text>
                                     </TouchableOpacity>
                                 ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.formGroup as StyleProp<ViewStyle>}>
+                            <Text style={styles.label}>AI Detected Intent</Text>
+                            <View style={styles.pillContainer as StyleProp<ViewStyle>}>
+                                {INTENTS.map(i => (
+                                    <TouchableOpacity
+                                        key={i}
+                                        style={[styles.pill as StyleProp<ViewStyle>, intent === i && (styles.pillActive as StyleProp<ViewStyle>)]}
+                                        onPress={() => setIntent(i)}
+                                    >
+                                        <Text style={[styles.pillText as any, intent === i && (styles.pillTextActive as any)]}>
+                                            {i}
+                                        </Text>
+                                    </TouchableOpacity>
+                                ))}
+                            </View>
+                        </View>
+
+                        <View style={styles.formGroup as StyleProp<ViewStyle>}>
+                            <Text style={styles.label}>Dependencies (Tasks to finish first)</Text>
+                            <View style={styles.pillContainer as StyleProp<ViewStyle>}>
+                                {allTasks.length === 0 && <Text style={{ color: "#94A3B8" }}>No other tasks available</Text>}
+                                {allTasks.slice(0, 10).map(t => {
+                                    const isSelected = dependencyIds.includes(t.id);
+                                    return (
+                                        <TouchableOpacity
+                                            key={t.id}
+                                            style={[styles.pill as StyleProp<ViewStyle>, isSelected && (styles.pillActive as StyleProp<ViewStyle>)]}
+                                            onPress={() => {
+                                                if (isSelected) setDependencyIds(dependencyIds.filter(id => id !== t.id));
+                                                else setDependencyIds([...dependencyIds, t.id]);
+                                            }}
+                                        >
+                                            <Text style={[styles.pillText as any, isSelected && (styles.pillTextActive as any)]} numberOfLines={1}>
+                                                {t.text.length > 20 ? t.text.substring(0, 20) + '...' : t.text}
+                                            </Text>
+                                        </TouchableOpacity>
+                                    );
+                                })}
                             </View>
                         </View>
 

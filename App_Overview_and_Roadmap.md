@@ -36,11 +36,54 @@ Here is a comprehensive overview of the **AI Task Organizer** app, explaining al
   * Uses **Expo Router** (`app/(tabs)`) to handle complex file-based routing. 
   * Clean UI elements, standard vector icons (`@expo/vector-icons`), and fluid animations using `react-native-reanimated`.
 
+### 6. Continuous On-Device NLP Training 🧠
+* **What it does:** The Offline ML model gets smarter the more you use the app. If you correct the AI's category or intent prediction, it permanently remembers their preference.
+* **How it works:** Triggers a background retraining hook (`src/ai/custom-model/retrainer.ts`) that adjusts the Naive Bayes probability matrix weights locally and saves them to `AsyncStorage`.
+
+### 7. Task Dependencies (Chaining logic) 🔗
+* **What it does:** Allows users to block Tasks until a prerequisite task is completed.
+* **How it works:** Renders visual padlock states (🔒) on Explore cards if a referenced `dependencyId` is incomplete.
+
+### 8. Smart Auto-Scheduling & Conflict Detection ⚖️
+* **What it does:** Prevents the user from burning themselves out natively.
+* **How it works:** Scans the target date, and if more than 5 tasks are scheduled on the same day, suggests auto-moving the new task to the next available "free" day mathematically.
+
+### 9. Generative Call & Meeting UI 📞
+* **What it does:** Task cards literally shape-shift. If the AI detects a task is about making a call or joining a meeting, it injects actionable buttons straight onto the card.
+* **How it works:** Evaluates the `intent` flag rendered in `explore.tsx`. Extracts phone numbers via Regex and hooks into OS-native dialers or URL endpoints via `Linking.openURL()`.
+
+### 10. Automated Daily Briefings 🌤️
+* **What it does:** A digital assistant push notification that wakes you up with what needs your attention today.
+* **How it works:** A scheduled CRON-style architecture loops ahead 7 days and builds customized, high-priority notifications using `expo-notifications`, automatically refreshing in the background.
+
+### 11. Weather-Aware Scheduling & Maps Integration 🗺️☀️
+* **What it does:** Contextually analyzes task locations and dates to provide hyper-local weather alerts and mapping data.
+* **How it works:** Pings the Open-Meteo API when viewing tasks with a `.location` property to fetch 7-day weather forecasts. Interacts with `Linking` to securely inject address data into Google Maps or Apple Maps deep-links.
+
+### 12. Share Module Integration �
+* **What it does:** Allows the user to select specific tasks and instantly format/share them to external apps (WhatsApp, Mail, etc).
+* **How it works:** Extends the `Share` object in React Native to interface natively with the iOS Share Sheet and Android Intent engine.
+
+### 13. Deep Productivity Analytics (Insights Tab) 📊
+* **What it does:** Visualizes the user's velocity, category breakdown, and priority metrics in a dedicated dashboard.
+* **How it works:** Computes real-time data aggregations on the `AsyncStorage` `tasks` array and mounts interactive UI charts inside `insights.tsx`.
+
 ---
 
-## 🚀 Future Development & Upgrades (Roadmap)
+## �🚀 Future Development & Upgrades (Roadmap)
 
 To take this application from a powerful prototype to an Enterprise/App-Store-ready product, here are the logical future steps:
+
+### 1. Cloud Sync & Multi-Device Support
+Currently, data is stored locally in SQLite. 
+* **The Upgrade:** Integrate **Supabase** or **Firebase**. This allows user authentication (Google/Apple Sign in) and real-time syncing so a task added on the phone instantly appears on a web dashboard or an iPad.
+
+### 2. Advanced AI "Agents" (Taking Action)
+Right now, the AI simply *reads and categorizes*. 
+* **The Upgrade:** Connect the AI to real-world APIs. If the user says, *"Email the quarterly report to Sarah."* The AI shouldn't just create a task—it should automatically map Sarah's email from contacts, draft the email, and queue it via a service like SendGrid, leaving just a "Confirm Send" button for the user.
+
+### 3. Wearable Integration (Apple Watch/WearOS)
+* **The Upgrade:** Build a lightweight companion app for smartwatches. Since the core feature is **Voice input**, bringing it directly to the user's wrist means they can tap a complication, speak a task in 3 seconds, and have it parsed into a perfectly categorized task on their phone without ever taking it out of their pocket.
 
 ### 1. Cloud Sync & Multi-Device Support
 Currently, data is stored locally in SQLite. 

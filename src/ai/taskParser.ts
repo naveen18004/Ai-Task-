@@ -7,6 +7,8 @@ export interface ParsedTask {
   priority: string;
   location?: string;
   smartScore?: number;
+  actionContact?: string;
+  actionPayload?: string;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -92,7 +94,9 @@ export function parseTaskText(text: string): ParsedTask {
 
   // ── Intent ──────────────────────────────────────────────────────────────
   let intent = 'task';
-  if (lower.match(/meeting|meet|sync|standup|call|phone/)) intent = 'meeting';
+  if (lower.match(/email|mail|send out|draft email/)) intent = 'email';
+  else if (lower.match(/text|sms|message|whatsapp/)) intent = 'sms';
+  else if (lower.match(/meeting|meet|sync|standup/)) intent = 'meeting';
   else if (lower.match(/call|phone|ring/)) intent = 'call';
   else if (lower.match(/remind|reminder|buy|grocery|groceries|shop|pickup/)) intent = 'reminder';
   else if (lower.match(/submit|assignment|homework|project|deadline/)) intent = 'submission';
@@ -235,6 +239,10 @@ export function parseTaskText(text: string): ParsedTask {
     }
   }
 
+  if (date && !time) {
+    time = '09:00 AM';
+  }
+
   // ── Location extraction ──────────────────────────────────────────────────
   let location = '';
   // match "at [Place]" or "in [Place]", explicitly avoiding time/date words
@@ -255,10 +263,26 @@ export function parseTaskText(text: string): ParsedTask {
 
   // ── Category ──────────────────────────────────────────────────────────────
   let category = 'General';
-  if (intent === 'meeting' || intent === 'call') category = 'Work';
-  else if (intent === 'reminder') category = 'Personal';
+  if (intent === 'meeting' || intent === 'call' || intent === 'email') category = 'Work';
+  else if (intent === 'reminder' || intent === 'sms') category = 'Personal';
   else if (intent === 'submission' || intent === 'exam') category = 'Education';
   else if (intent === 'appointment') category = 'Health';
+
+  // ── Smart Autonomous Extraction ───────────────────────────────────────────
+  let actionContact = '';
+  let actionPayload = '';
+
+  if (intent === 'email' || intent === 'sms' || intent === 'call') {
+    const contactMatch = text.match(/(?:email|mail|message|text|call|to)\s+([A-Za-z0-9\-+\.]+)\b/i);
+    if (contactMatch && !['the', 'my', 'to', 'me', 'a', 'an'].includes(contactMatch[1].toLowerCase())) {
+      actionContact = contactMatch[1];
+      // Try to get actual message content via heuristics 'that X' or 'about Y'
+      const payloadMatch = text.match(/(?:that|to say|saying|about)\s+(.*)/i);
+      if (payloadMatch) {
+        actionPayload = payloadMatch[1].trim();
+      }
+    }
+  }
 
   // ── Smart Summary ─────────────────────────────────────────────────────────
   // Shrink long text into a concise title for the UI
@@ -272,10 +296,7 @@ export function parseTaskText(text: string): ParsedTask {
     summary = summary.replace(/^\*+|\*+$/g, '');
   }
 
-  // Truncate if it's still way too long
-  if (summary.length > 60) {
-    summary = summary.substring(0, 57).trim() + '...';
-  }
+  // Allow the UI to handle visual text wrapping natively instead of hard-truncating.
 
   // ── Smart Score (Eisenhower matrix numeric mapping) ─────────────────────
   let smartScore = 0;
@@ -302,6 +323,8 @@ export function parseTaskText(text: string): ParsedTask {
     category,
     priority,
     location,
-    smartScore
+    smartScore,
+    actionContact,
+    actionPayload
   };
 }

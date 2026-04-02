@@ -7,7 +7,7 @@ import { transcribeAudioWithGroq } from "@/src/ai/groqAudio";
 import { parseTaskText } from "@/src/ai/taskParser";
 import { geocodeLocationString, startGeofenceForTask } from "@/src/notifications/locationService";
 import { scheduleReminder, setupNotifications } from "@/src/notifications/notificationService";
-import { getApiKey, getGroqApiKey, saveTaskStr, Task } from "@/src/storage/asyncStorage";
+import { getApiKey, getGroqApiKey, getNextAvailableDate, saveTaskStr, Task } from "@/src/storage/asyncStorage";
 import { getWeatherForTask } from "@/src/weather/weatherService";
 import { Audio } from 'expo-av';
 
@@ -53,8 +53,8 @@ export default function AddTask() {
         }
       }
 
-      let locationCoords;
-      let weatherAlert;
+      let locationCoords: { latitude: number; longitude: number } | null = null;
+      let weatherAlert: { condition: string, temp: number } | undefined;
 
       if (parsed.location) {
         locationCoords = await geocodeLocationString(parsed.location);
@@ -78,6 +78,8 @@ export default function AddTask() {
         priority: parsed.priority,
         location: parsed.location,
         locationCoords: locationCoords || undefined,
+        actionContact: parsed.actionContact,
+        actionPayload: parsed.actionPayload,
         createdAt: new Date().toISOString(),
         smartScore: parsed.smartScore,
         subTasks,
@@ -85,53 +87,74 @@ export default function AddTask() {
         weatherAlert
       };
 
-      const saved = await saveTaskStr(newTask);
-      if (!saved) {
-        Alert.alert("Duplicate Task", "This exact task is already in your list.");
-        router.back();
-        return;
-      }
-
-      // If Location exists & geocoded, start Geofence
-      if (parsed.location && locationCoords) {
-        await startGeofenceForTask(newTask.id, newTask.text, locationCoords.latitude, locationCoords.longitude);
-        Alert.alert("Geofence Set", `Reminders will trigger when you arrive at ${parsed.location}.`);
-      }
-
-      // If date & time exist, schedule reminder
-      if (parsed.date && parsed.time) {
-        // Normalize: "2 PM" -> "2:00 PM"
-        const normalizedTime = parsed.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
-        const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-        const baseDateMs = new Date(parsed.date).setHours(0, 0, 0, 0);
-
-        if (timeMatch && !isNaN(baseDateMs)) {
-          let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
-          const period = (timeMatch[3] || '').toUpperCase();
-          if (period === 'PM' && h !== 12) h += 12;
-          if (period === 'AM' && h === 12) h = 0;
-          const base = new Date(baseDateMs);
-          const reminderDate = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
-          const now = new Date();
-
-          if (reminderDate > now) {
-            await scheduleReminder("Task Reminder", taskText, reminderDate);
-            Alert.alert("Reminder Set", `Task saved and reminder scheduled for ${parsed.time}`);
-          } else {
-            Alert.alert("Task Saved", "Task saved, but the time is already in the past — no reminder scheduled.");
+      const doFinalSave = async (taskToSave: Task) => {
+        setIsProcessingAudio(true);
+        try {
+          const saved = await saveTaskStr(taskToSave);
+          if (!saved) {
+            Alert.alert("Duplicate Task", "This exact task is already in your list.");
+            router.back();
+            return;
           }
-        } else {
-          Alert.alert("Task Saved", "Task saved. Could not parse the time for a reminder.");
+
+          if (parsed.location && locationCoords) {
+            await startGeofenceForTask(taskToSave.id, taskToSave.text, locationCoords.latitude, locationCoords.longitude);
+            Alert.alert("Geofence Set", `Reminders will trigger when you arrive at ${parsed.location}.`);
+          }
+
+          if (parsed.date && parsed.time) {
+            const normalizedTime = parsed.time.replace(/^(\d{1,2})\s?(AM|PM)$/i, '$1:00 $2');
+            const timeMatch = normalizedTime.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+            const baseDateMs = new Date(parsed.date).setHours(0, 0, 0, 0);
+
+            if (timeMatch && !isNaN(baseDateMs)) {
+              let h = parseInt(timeMatch[1]), m = parseInt(timeMatch[2]);
+              const period = (timeMatch[3] || '').toUpperCase();
+              if (period === 'PM' && h !== 12) h += 12;
+              if (period === 'AM' && h === 12) h = 0;
+              const base = new Date(baseDateMs);
+              const reminderDate = new Date(base.getFullYear(), base.getMonth(), base.getDate(), h, m, 0, 0);
+              const now = new Date();
+
+              if (reminderDate > now) {
+                await scheduleReminder("Task Reminder", taskText, reminderDate);
+                Alert.alert("Reminder Set", `Task saved and reminder scheduled for ${parsed.time}`);
+              } else {
+                Alert.alert("Task Saved", "Task saved, but the time is already in the past — no reminder scheduled.");
+              }
+            } else {
+              Alert.alert("Task Saved", "Task saved. Could not parse the time for a reminder.");
+            }
+          } else if (!parsed.location) {
+            Alert.alert("Task Saved", "No date/time detected, reminder not set");
+          }
+
+          router.back();
+        } finally {
+          setIsProcessingAudio(false);
         }
-      } else if (!parsed.location) {
-        Alert.alert("Task Saved", "No date/time detected, reminder not set");
+      };
+
+      if (newTask.date) {
+        const nextDate = await getNextAvailableDate(newTask.date);
+        if (nextDate && nextDate !== newTask.date) {
+          setIsProcessingAudio(false);
+          Alert.alert(
+            "Busy Schedule!",
+            `You already have 5 tasks scheduled for ${newTask.date}. Do you want to Auto-Schedule this to ${nextDate} instead?`,
+            [
+              { text: "Keep Original", onPress: () => doFinalSave(newTask) },
+              { text: `Move to ${nextDate}`, onPress: () => doFinalSave({ ...newTask, date: nextDate }) }
+            ]
+          );
+          return; // Exit here
+        }
       }
 
-      router.back();
+      await doFinalSave(newTask);
     } catch (e) {
       console.error("Save Task Error", e);
       Alert.alert("Error", "Failed to save the task.");
-    } finally {
       setIsProcessingAudio(false);
     }
   };
